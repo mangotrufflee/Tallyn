@@ -1,0 +1,11 @@
+invoice_id,date,amount,vendor,reference
+INV001,2026-08-01,50000,Amazon Web Services India Pvt Ltd,B001
+INV002,2026-08-02,12500,Meta Platforms,B002
+INV003,2026-08-04,8900,Flipkart Internet Pvt Ltd,B003
+INV004,2026-08-04,16000,Google Cloud India,B004
+INV005,2026-08-05,7200,Swiggy Pvt Ltd,B005
+INV006,2026-08-06,18000,Razorpay,B006
+INV007,2026-08-07,22000,Amazon,B007
+INV008,2026-08-08,9500,Uber India,B008
+INV009,2026-08-09,11000,Netflix,B009
+INV010,2026-08-12,6500,Zoho Corporation,B010
