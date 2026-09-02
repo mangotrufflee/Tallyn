@@ -3,10 +3,7 @@ from rapidfuzz.fuzz import ratio
 
 
 def normalize_vendor(name):
-    """
-    Normalize vendor names so that small naming differences
-    do not prevent a match.
-    """
+    """Normalize vendor names."""
 
     name = str(name).lower().strip()
 
@@ -29,29 +26,23 @@ def normalize_vendor(name):
 
 
 def vendor_similarity(bank_vendor, erp_vendor):
-    """
-    Compare vendor names using fuzzy string matching.
-    Returns a score between 0 and 100.
-    """
+    """Return vendor similarity from 0 to 100."""
 
     bank_vendor = normalize_vendor(bank_vendor)
     erp_vendor = normalize_vendor(erp_vendor)
 
-    return ratio(bank_vendor, erp_vendor)
+    return ratio(
+        bank_vendor,
+        erp_vendor
+    )
 
 
 def date_similarity(bank_date, erp_date):
-    """
-    Compare transaction dates.
+    """Return date similarity from 0 to 100."""
 
-    Exact date = 100
-    1 day difference = 80
-    2 days difference = 60
-    3 days difference = 40
-    More than 3 days = 0
-    """
-
-    difference = abs((bank_date - erp_date).days)
+    difference = abs(
+        (bank_date - erp_date).days
+    )
 
     if difference == 0:
         return 100
@@ -66,16 +57,11 @@ def date_similarity(bank_date, erp_date):
 
 
 def amount_similarity(bank_amount, erp_amount):
-    """
-    Compare transaction amounts.
+    """Return amount similarity from 0 to 100."""
 
-    Exact amount = 100
-    Difference <= 100 = 80
-    Difference <= 500 = 50
-    Difference > 500 = 0
-    """
-
-    difference = abs(bank_amount - erp_amount)
+    difference = abs(
+        bank_amount - erp_amount
+    )
 
     if difference == 0:
         return 100
@@ -88,10 +74,7 @@ def amount_similarity(bank_amount, erp_amount):
 
 
 def calculate_match_score(bank_row, erp_row):
-    """
-    Calculate the overall match score between
-    one bank transaction and one ERP transaction.
-    """
+    """Calculate combined matching score."""
 
     amount_score = amount_similarity(
         bank_row["amount"],
@@ -108,7 +91,6 @@ def calculate_match_score(bank_row, erp_row):
         erp_row["date"]
     )
 
-    # Weighted scoring
     final_score = (
         amount_score * 0.50
         + vendor_score * 0.30
@@ -125,20 +107,10 @@ def calculate_match_score(bank_row, erp_row):
 
 def find_best_match(bank_row, erp):
     """
-    Compare one bank transaction against every ERP record
-    and return the best candidate.
+    Find the best and second-best ERP candidates.
     """
 
-    best_match = None
-    best_score = 0
-
-    # Initialize as a dictionary so it can never be None.
-    best_scores = {
-        "final_score": 0,
-        "amount_score": 0,
-        "vendor_score": 0,
-        "date_score": 0,
-    }
+    candidates = []
 
     for _, erp_row in erp.iterrows():
 
@@ -147,49 +119,131 @@ def find_best_match(bank_row, erp):
             erp_row
         )
 
-        score = scores["final_score"]
+        candidates.append({
+            "erp_row": erp_row,
+            "scores": scores,
+        })
 
-        if score > best_score:
-            best_score = score
-            best_match = erp_row
-            best_scores = scores
+    # Sort highest score first
+    candidates.sort(
+        key=lambda x: x["scores"]["final_score"],
+        reverse=True
+    )
 
-    # Do not force a weak match.
-    if best_score < 70:
-        best_match = None
+    # No candidates
+    if len(candidates) == 0:
 
-    return best_match, best_score, best_scores
+        return (
+            None,
+            0,
+            0,
+            {
+                "final_score": 0,
+                "amount_score": 0,
+                "vendor_score": 0,
+                "date_score": 0,
+            },
+        )
 
+    # Best candidate
+    best_candidate = candidates[0]
 
-def classify_match(score):
-    """
-    Convert confidence score into a business status.
-    """
+    best_match = best_candidate["erp_row"]
 
-    if score >= 90:
-        return "MATCHED"
+    best_scores = best_candidate["scores"]
 
-    elif score >= 70:
-        return "WARNING"
+    best_score = best_scores["final_score"]
+
+    # Second-best candidate
+    if len(candidates) > 1:
+
+        second_best_score = (
+            candidates[1]["scores"]["final_score"]
+        )
 
     else:
+
+        second_best_score = 0
+
+    # Do not accept very weak matches
+    if best_score < 70:
+
+        best_match = None
+
+    return (
+        best_match,
+        best_score,
+        second_best_score,
+        best_scores,
+    )
+
+
+def classify_match(
+    score,
+    second_best_score,
+    erp_row
+):
+    """
+    Classify the confidence of the match.
+
+    MATCHED:
+        Strong confidence and clear separation
+        from the next candidate.
+
+    WARNING:
+        Possible match but requires review.
+
+    EXCEPTION:
+        No sufficiently reliable match.
+    """
+
+    if erp_row is None:
         return "EXCEPTION"
 
+    margin = (
+        score - second_best_score
+    )
 
-def get_exception_reason(bank_row, erp_row, score):
-    """
-    Explain why a transaction requires review.
-    """
+    # Strong and clearly better than alternatives
+    if score >= 90 and margin >= 5:
+        return "MATCHED"
+
+    # Strong score but ambiguous
+    if score >= 90 and margin < 5:
+        return "WARNING"
+
+    # Medium confidence
+    if score >= 70:
+        return "WARNING"
+
+    return "EXCEPTION"
+
+
+def get_exception_reason(
+    bank_row,
+    erp_row,
+    score,
+    second_best_score
+):
+    """Explain why a transaction needs review."""
 
     if erp_row is None:
         return "No reliable ERP match found"
 
     amount_difference = abs(
-        bank_row["amount"] - erp_row["amount"]
+        bank_row["amount"]
+        - erp_row["amount"]
     )
 
     date_difference = abs(
-        (bank_row["date"] - erp_row["date"]).days
+        (
+            bank_row["date"]
+            - erp_row["date"]
+        ).days
+    )
+
+    margin = (
+        score - second_best_score
     )
 
     if amount_difference > 500:
@@ -200,7 +254,16 @@ def get_exception_reason(bank_row, erp_row, score):
         )
 
     if date_difference > 3:
-        return "Transaction dates are too far apart"
+        return (
+            "Transaction dates are "
+            "too far apart"
+        )
+
+    if margin < 5:
+        return (
+            "Ambiguous match: "
+            "top candidates have similar scores"
+        )
 
     if score < 70:
         return "Low confidence match"
@@ -210,67 +273,112 @@ def get_exception_reason(bank_row, erp_row, score):
 
 def reconcile(bank, erp):
     """
-    Reconcile every bank transaction against ERP records.
-
-    Returns a DataFrame containing:
-    - predicted invoice
-    - confidence
-    - status
-    - individual matching scores
-    - exception reason
+    Reconcile all bank transactions
+    against ERP transactions.
     """
 
     results = []
 
     for _, bank_row in bank.iterrows():
 
-        match, score, scores = find_best_match(
+        (
+            match,
+            score,
+            second_best_score,
+            scores,
+        ) = find_best_match(
             bank_row,
             erp
         )
 
-        status = classify_match(score)
+        status = classify_match(
+            score,
+            second_best_score,
+            match
+        )
 
         if match is not None:
 
-            matched_invoice = match["invoice_id"]
+            matched_invoice = (
+                match["invoice_id"]
+            )
 
             reason = get_exception_reason(
                 bank_row,
                 match,
-                score
+                score,
+                second_best_score
             )
 
         else:
 
             matched_invoice = None
-            reason = "No reliable ERP match found"
+
+            reason = (
+                "No reliable ERP match found"
+            )
+
+        margin = (
+            score - second_best_score
+        )
 
         results.append({
-            "transaction_id": bank_row["transaction_id"],
-            "bank_amount": bank_row["amount"],
-            "bank_date": bank_row["date"],
-            "counterparty": bank_row["counterparty"],
-            "matched_invoice": matched_invoice,
-            "confidence": round(score, 2),
-            "status": status,
-            "amount_score": round(
-                scores["amount_score"],
-                2
-            ),
-            "vendor_score": round(
-                scores["vendor_score"],
-                2
-            ),
-            "date_score": round(
-                scores["date_score"],
-                2
-            ),
-            "reason": (
+
+            "transaction_id":
+                bank_row["transaction_id"],
+
+            "bank_amount":
+                bank_row["amount"],
+
+            "bank_date":
+                bank_row["date"],
+
+            "counterparty":
+                bank_row["counterparty"],
+
+            "matched_invoice":
+                matched_invoice,
+
+            "confidence":
+                round(score, 2),
+
+            "second_best_score":
+                round(
+                    second_best_score,
+                    2
+                ),
+
+            "confidence_margin":
+                round(
+                    margin,
+                    2
+                ),
+
+            "status":
+                status,
+
+            "amount_score":
+                round(
+                    scores["amount_score"],
+                    2
+                ),
+
+            "vendor_score":
+                round(
+                    scores["vendor_score"],
+                    2
+                ),
+
+            "date_score":
+                round(
+                    scores["date_score"],
+                    2
+                ),
+
+            "reason":
                 reason
                 if status != "MATCHED"
-                else ""
-            ),
+                else "",
         })
 
     return pd.DataFrame(results)

@@ -21,6 +21,15 @@ ground_truth = pd.read_csv(
     "data/verification.csv"
 )
 
+print("Bank records:", len(bank))
+print("ERP records:", len(erp))
+print("Ground truth records:", len(ground_truth))
+
+print("\nGround truth sample:")
+print(ground_truth.head())
+
+print("\nGround truth columns:")
+print(ground_truth.columns.tolist())
 
 # ============================================================
 # 2. CONVERT DATES
@@ -106,6 +115,8 @@ print(
             "transaction_id",
             "matched_invoice",
             "confidence",
+            "second_best_score",
+            "confidence_margin",
             "status",
             "reason"
         ]
