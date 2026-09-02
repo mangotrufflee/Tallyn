@@ -1,321 +1,103 @@
+import time
 import pandas as pd
-from rapidfuzz.fuzz import ratio
+
+from matcher import reconcile
+from evaluator import evaluate_predictions
 
 
 # ============================================================
 # 1. LOAD DATA
 # ============================================================
 
-bank = pd.read_csv("data/bank.csv")
-erp = pd.read_csv("data/erp.csv")
+bank = pd.read_csv(
+    "data/bank.csv"
+)
 
+erp = pd.read_csv(
+    "data/erp.csv"
+)
 
-# Convert date columns from text into actual dates
-bank["date"] = pd.to_datetime(bank["date"])
-erp["date"] = pd.to_datetime(erp["date"])
-
-
-# ============================================================
-# 2. NORMALIZE VENDOR NAMES
-# ============================================================
-
-def normalize_vendor(name):
-    """
-    Converts vendor names into a simpler,
-    more comparable format.
-    """
-
-    name = str(name).lower().strip()
-
-    replacements = [
-        "private limited",
-        "pvt ltd",
-        "private ltd",
-        "pvt. ltd.",
-        "limited",
-        "ltd.",
-        "ltd",
-    ]
-
-    for replacement in replacements:
-        name = name.replace(replacement, "")
-
-    # Remove extra spaces
-    name = " ".join(name.split())
-
-    return name
+ground_truth = pd.read_csv(
+    "data/verification.csv"
+)
 
 
 # ============================================================
-# 3. VENDOR SIMILARITY
+# 2. CONVERT DATES
 # ============================================================
 
-def vendor_similarity(bank_vendor, erp_vendor):
-    """
-    Returns a similarity score between 0 and 100.
-    """
+bank["date"] = pd.to_datetime(
+    bank["date"]
+)
 
-    bank_vendor = normalize_vendor(bank_vendor)
-    erp_vendor = normalize_vendor(erp_vendor)
-
-    return ratio(bank_vendor, erp_vendor)
+erp["date"] = pd.to_datetime(
+    erp["date"]
+)
 
 
 # ============================================================
-# 4. DATE SIMILARITY
+# 3. START RECONCILIATION
 # ============================================================
 
-def date_similarity(bank_date, erp_date):
-    """
-    Calculates how close the two transaction dates are.
+print()
+print("Running reconciliation...")
+print()
 
-    Same day  -> 100
-    1 day      -> 80
-    2 days     -> 60
-    3 days     -> 40
-    >3 days    -> 0
-    """
 
-    difference = abs((bank_date - erp_date).days)
+start_time = time.perf_counter()
 
-    if difference == 0:
-        return 100
 
-    elif difference == 1:
-        return 80
+results_df = reconcile(
+    bank,
+    erp
+)
 
-    elif difference == 2:
-        return 60
 
-    elif difference == 3:
-        return 40
-
-    else:
-        return 0
+end_time = time.perf_counter()
 
 
 # ============================================================
-# 5. AMOUNT SIMILARITY
+# 4. CALCULATE PROCESSING PERFORMANCE
 # ============================================================
 
-def amount_similarity(bank_amount, erp_amount):
-    """
-    Calculates how similar two transaction amounts are.
+processing_time = (
+    end_time - start_time
+)
 
-    Exact match       -> 100
-    Difference <=100  -> 80
-    Difference <=500  -> 50
-    Otherwise         -> 0
-    """
+records_processed = len(bank)
 
-    difference = abs(bank_amount - erp_amount)
+if processing_time > 0:
 
-    if difference == 0:
-        return 100
-
-    elif difference <= 100:
-        return 80
-
-    elif difference <= 500:
-        return 50
-
-    else:
-        return 0
-
-
-# ============================================================
-# 6. CALCULATE OVERALL MATCH SCORE
-# ============================================================
-
-def calculate_match_score(bank_row, erp_row):
-
-    amount_score = amount_similarity(
-        bank_row["amount"],
-        erp_row["amount"]
+    throughput = (
+        records_processed
+        / processing_time
     )
 
-    date_score = date_similarity(
-        bank_row["date"],
-        erp_row["date"]
-    )
+else:
 
-    vendor_score = vendor_similarity(
-        bank_row["counterparty"],
-        erp_row["vendor"]
-    )
-
-    # Weighted score
-    #
-    # Amount       = 50%
-    # Vendor       = 30%
-    # Date         = 20%
-
-    final_score = (
-        amount_score * 0.50
-        + vendor_score * 0.30
-        + date_score * 0.20
-    )
-
-    return {
-        "final_score": final_score,
-        "amount_score": amount_score,
-        "vendor_score": vendor_score,
-        "date_score": date_score,
-    }
+    throughput = 0
 
 
 # ============================================================
-# 7. FIND BEST MATCH
+# 5. EVALUATE RESULTS
 # ============================================================
 
-def find_best_match(bank_row, erp):
-
-    best_match = None
-    best_score = 0
-
-    best_scores = {
-        "final_score": 0,
-        "amount_score": 0,
-        "vendor_score": 0,
-        "date_score": 0,
-    }
-
-    for _, erp_row in erp.iterrows():
-
-        scores = calculate_match_score(
-            bank_row,
-            erp_row
-        )
-
-        score = scores["final_score"]
-
-        if score > best_score:
-
-            best_score = score
-            best_match = erp_row
-            best_scores = scores
-
-    return best_match, best_score, best_scores
+(
+    metrics,
+    evaluation_df,
+    incorrect_predictions
+) = evaluate_predictions(
+    results_df,
+    ground_truth
+)
 
 
 # ============================================================
-# 8. CLASSIFY MATCH
+# 6. DISPLAY RECONCILIATION RESULTS
 # ============================================================
 
-def classify_match(score):
-
-    if score >= 90:
-        return "MATCHED"
-
-    elif score >= 70:
-        return "WARNING"
-
-    else:
-        return "EXCEPTION"
-
-
-# ============================================================
-# 9. FIND EXCEPTION REASON
-# ============================================================
-
-def get_exception_reason(bank_row, erp_row, score):
-
-    if erp_row is None:
-        return "No matching ERP record found"
-
-    amount_difference = abs(
-        bank_row["amount"] - erp_row["amount"]
-    )
-
-    date_difference = abs(
-        (bank_row["date"] - erp_row["date"]).days
-    )
-
-    if amount_difference > 500:
-        return (
-            f"Amount mismatch: "
-            f"₹{bank_row['amount']:,.2f} vs "
-            f"₹{erp_row['amount']:,.2f}"
-        )
-
-    if date_difference > 3:
-        return "Transaction dates are too far apart"
-
-    if score < 70:
-        return "Low confidence match"
-
-    return "Requires review"
-
-
-# ============================================================
-# 10. RUN RECONCILIATION
-# ============================================================
-
-results = []
-
-
-for _, bank_row in bank.iterrows():
-
-    match, score, scores = find_best_match(
-        bank_row,
-        erp
-    )
-
-    status = classify_match(score)
-
-    if match is not None:
-        exception_reason = get_exception_reason(
-            bank_row,
-            match,
-            score
-        )
-
-        matched_invoice = match["invoice_id"]
-
-    else:
-        exception_reason = "No matching ERP record found"
-        matched_invoice = None
-
-    results.append({
-        "transaction_id": bank_row["transaction_id"],
-        "bank_amount": bank_row["amount"],
-        "bank_date": bank_row["date"].date(),
-        "counterparty": bank_row["counterparty"],
-        "matched_invoice": matched_invoice,
-        "confidence": round(score, 2),
-        "status": status,
-        "amount_score": round(
-            scores["amount_score"], 2
-        ),
-        "vendor_score": round(
-            scores["vendor_score"], 2
-        ),
-        "date_score": round(
-            scores["date_score"], 2
-        ),
-        "reason": (
-            exception_reason
-            if status != "MATCHED"
-            else ""
-        ),
-    })
-
-
-# ============================================================
-# 11. CREATE RESULTS TABLE
-# ============================================================
-
-results_df = pd.DataFrame(results)
-
-
-# ============================================================
-# 12. DISPLAY RESULTS
-# ============================================================
-
-print("\n")
 print("=" * 80)
-print("             AI FINANCE CONTROLLER")
-print("             RECONCILIATION RESULTS")
+print("RECONCILIATION RESULTS")
 print("=" * 80)
 
 print(
@@ -325,56 +107,147 @@ print(
             "matched_invoice",
             "confidence",
             "status",
-            "reason",
+            "reason"
         ]
     ].to_string(index=False)
 )
 
 
 # ============================================================
-# 13. SUMMARY
+# 7. DISPLAY PERFORMANCE REPORT
 # ============================================================
 
-total = len(results_df)
-
-matched = len(
-    results_df[
-        results_df["status"] == "MATCHED"
-    ]
-)
-
-warnings = len(
-    results_df[
-        results_df["status"] == "WARNING"
-    ]
-)
-
-exceptions = len(
-    results_df[
-        results_df["status"] == "EXCEPTION"
-    ]
-)
-
-
-auto_resolution_rate = (
-    matched / total * 100
-    if total > 0
-    else 0
-)
-
-
-print("\n")
+print()
 print("=" * 80)
-print("SUMMARY")
+print("PERFORMANCE REPORT")
 print("=" * 80)
 
-print(f"Total transactions : {total}")
-print(f"Matched            : {matched}")
-print(f"Warnings           : {warnings}")
-print(f"Exceptions         : {exceptions}")
 print(
-    f"Auto-resolution    : "
-    f"{auto_resolution_rate:.2f}%"
+    f"Records processed: "
+    f"{metrics['total_records']}"
 )
 
+print(
+    f"Matched: "
+    f"{metrics['matched_records']}"
+)
+
+print(
+    f"Warnings: "
+    f"{metrics['warning_records']}"
+)
+
+print(
+    f"Exceptions: "
+    f"{metrics['exception_records']}"
+)
+
+print()
+
+print(
+    f"Accuracy: "
+    f"{metrics['accuracy']}%"
+)
+
+print(
+    f"Precision: "
+    f"{metrics['precision']}%"
+)
+
+print(
+    f"Recall: "
+    f"{metrics['recall']}%"
+)
+
+print(
+    f"F1 Score: "
+    f"{metrics['f1']}%"
+)
+
+print()
+
+print(
+    f"Auto-resolution rate: "
+    f"{metrics['auto_resolution_rate']}%"
+)
+
+print(
+    f"Warning rate: "
+    f"{metrics['warning_rate']}%"
+)
+
+print(
+    f"Exception rate: "
+    f"{metrics['exception_rate']}%"
+)
+
+print()
+
+print(
+    f"True positives: "
+    f"{metrics['true_positives']}"
+)
+
+print(
+    f"False positives: "
+    f"{metrics['false_positives']}"
+)
+
+print(
+    f"False negatives: "
+    f"{metrics['false_negatives']}"
+)
+
+print()
+
+print(
+    f"Processing time: "
+    f"{processing_time:.4f} seconds"
+)
+
+print(
+    f"Throughput: "
+    f"{throughput:.2f} records/second"
+)
+
+
+# ============================================================
+# 8. DISPLAY INCORRECT PREDICTIONS
+# ============================================================
+
+print()
+print("=" * 80)
+print("INCORRECT PREDICTIONS / EXCEPTIONS")
+print("=" * 80)
+
+
+if len(incorrect_predictions) == 0:
+
+    print(
+        "No incorrect predictions."
+    )
+
+else:
+
+    print(
+        incorrect_predictions[
+            [
+                "transaction_id",
+                "matched_invoice",
+                "expected_invoice",
+                "confidence",
+                "status",
+                "reason"
+            ]
+        ].to_string(index=False)
+    )
+
+
+# ============================================================
+# 9. FINISH
+# ============================================================
+
+print()
+print("=" * 80)
+print("RECONCILIATION COMPLETE")
 print("=" * 80)
