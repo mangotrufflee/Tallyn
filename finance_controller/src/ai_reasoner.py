@@ -2,61 +2,17 @@ import json
 from openai import OpenAI
 
 def build_ai_prompt(bank_row, candidates):
-    """
-    Build the prompt that will be sent to the AI.
-
-    The AI receives:
-    1. The bank transaction
-    2. A small set of possible ERP matches
-    3. Matching scores calculated by our deterministic matcher
-
-    The AI's job is to reason about the evidence.
-    """
-
-    candidate_text = ""
-
-    for i, candidate in enumerate(candidates, start=1):
-
-        candidate_text += f"""
-CANDIDATE {i}
-
-Invoice ID:
-{candidate["invoice_id"]}
-
-Date:
-{candidate["date"]}
-
-Amount:
-₹{candidate["amount"]:,.2f}
-
-Vendor:
-{candidate["vendor"]}
-
-Amount similarity:
-{candidate["amount_score"]}
-
-Vendor similarity:
-{candidate["vendor_score"]}
-
-Date similarity:
-{candidate["date_score"]}
-
-Overall matching score:
-{candidate["final_score"]}
-
-"""
-
 
     prompt = f"""
-You are an AI finance reconciliation assistant.
+You are a cautious AI finance reconciliation assistant.
 
-Your task is to evaluate whether a bank transaction
-can safely be reconciled with one of the provided
-ERP transaction candidates.
+Your job is to verify whether the BANK TRANSACTION matches
+one of the PROVIDED ERP CANDIDATES.
 
-You are assisting a finance operations team.
-Financial accuracy is more important than forcing
-a match.
+You MUST only select an invoice from the candidates provided.
+You MUST NOT invent an invoice.
+
+Financial accuracy is more important than forcing a match.
 
 ==================================================
 BANK TRANSACTION
@@ -79,39 +35,137 @@ Counterparty:
 ERP CANDIDATES
 ==================================================
 
-{candidate_text}
+"""
 
+    for i, candidate in enumerate(candidates, start=1):
+
+        prompt += f"""
+CANDIDATE {i}
+
+Invoice ID:
+{candidate["invoice_id"]}
+
+Date:
+{candidate["date"]}
+
+Amount:
+₹{candidate["amount"]:,.2f}
+
+Vendor:
+{candidate["vendor"]}
+
+Reference:
+{candidate["reference"]}
+
+Amount similarity:
+{candidate["amount_score"]}
+
+Vendor similarity:
+{candidate["vendor_score"]}
+
+Date similarity:
+{candidate["date_score"]}
+
+Reference similarity:
+{candidate["reference_score"]}
+
+Overall matching score:
+{candidate["final_score"]}
+
+"""
+
+    prompt += """
+==================================================
+HOW TO REASON
+==================================================
+
+Use the following evidence hierarchy:
+
+1. DIRECT REFERENCE MATCH IS THE STRONGEST EVIDENCE.
+
+If the ERP candidate's Reference exactly matches the
+Bank Transaction ID, this is strong evidence that the
+candidate belongs to the bank transaction.
+
+2. EXACT DATE MATCH IS STRONG EVIDENCE.
+
+3. EXACT AMOUNT MATCH IS STRONG EVIDENCE.
+
+4. VENDOR SIMILARITY IS SUPPORTING EVIDENCE.
+
+Vendor names may legitimately differ between systems.
+For example:
+
+NETFLIX
+Netflix Entertainment Services
+
+can refer to the same organization.
+
+55. MATERIAL AMOUNT DIFFERENCES PREVENT AUTOMATIC MATCHING.
+
+Amount consistency is mandatory for an automatic MATCH.
+
+If the bank amount and ERP amount differ materially,
+the candidate must NOT be classified as MATCH.
+
+Even if the reference, vendor and date match,
+a material amount discrepancy means the transaction
+requires REVIEW.
+
+For example:
+
+Bank amount: ₹9,500
+ERP amount: ₹14,500
+
+This is a ₹5,000 discrepancy.
+
+The correct decision is:
+
+REVIEW
+
+The matching invoice may still be selected as the
+suspected invoice, but it must NOT be marked MATCH.
+
+6. DO NOT BE OVERLY CAUTIOUS WHEN MULTIPLE STRONG SIGNALS AGREE.
+
+If one candidate has:
+
+- exact reference match
+- exact date match
+- exact amount match
+- strong vendor similarity
+
+then that candidate should normally be classified as MATCH.
+
+7. REVIEW should be used when evidence is conflicting
+or when two or more candidates remain genuinely plausible.
+
+8. EXCEPTION should be used when no candidate has
+sufficient evidence.
+
+9. Never select a candidate that was not provided.
+
+10. Do not reject a candidate merely because the ERP vendor
+name is longer or formatted differently from the bank name.
 
 ==================================================
-DECISION RULES
+IMPORTANT
 ==================================================
 
-1. Do not automatically select the candidate with
-   the highest numerical score.
+The numerical matching scores were calculated by a
+deterministic reconciliation system.
 
-2. Compare the transaction amount carefully.
+Use those scores as evidence.
 
-3. Consider differences in transaction dates.
+A candidate with:
 
-4. Vendor-name variations are acceptable when they
-   clearly refer to the same organization.
+Reference similarity = 100
+Date similarity = 100
+Amount similarity = 100
+Vendor similarity = 100
+Overall score = 100
 
-5. A large amount discrepancy should normally prevent
-   automatic reconciliation.
-
-6. If multiple candidates are similarly plausible,
-   recommend REVIEW.
-
-7. If there is insufficient evidence to identify a
-   reliable match, recommend EXCEPTION.
-
-8. Never invent missing information.
-
-9. Prefer REVIEW or EXCEPTION over an unsafe
-   financial decision.
-
-10. Give a short explanation for your decision.
-
+has extremely strong evidence and should normally be MATCH.
 
 ==================================================
 OUTPUT FORMAT
@@ -125,7 +179,7 @@ Use exactly this structure:
     "decision": "MATCH",
     "selected_invoice": "INV0001",
     "confidence": 95,
-    "reason": "The amount, vendor and date strongly support the match.",
+    "reason": "The transaction matches the ERP candidate on reference, amount, date and vendor.",
     "risk": "LOW"
 }}
 
@@ -135,7 +189,7 @@ MATCH
 REVIEW
 EXCEPTION
 
-If there is no suitable invoice, use:
+If there is no suitable invoice:
 
 "selected_invoice": null
 
@@ -151,101 +205,91 @@ HIGH
     return prompt
 
 
-def validate_ai_response(response):
-    """
-    Validate the JSON returned by the AI.
-
-    This protects the finance pipeline from malformed
-    or unexpected AI responses.
-    """
+def validate_ai_response(raw_response):
 
     try:
-        result = json.loads(response)
+        cleaned_response = raw_response.strip()
+
+        # Remove Markdown code fences if the model adds them
+        if cleaned_response.startswith("```"):
+            lines = cleaned_response.splitlines()
+
+            # Remove first line: ```json
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+
+            # Remove last line: ```
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+
+            cleaned_response = "\n".join(lines).strip()
+
+        result = json.loads(cleaned_response)
+
+        required_fields = [
+            "decision",
+            "selected_invoice",
+            "confidence",
+            "reason",
+            "risk"
+        ]
+
+        for field in required_fields:
+            if field not in result:
+                return {
+                    "valid": False,
+                    "error": f"Missing field: {field}",
+                    "result": None
+                }
+
+        if result["decision"] not in [
+            "MATCH",
+            "REVIEW",
+            "EXCEPTION"
+        ]:
+            return {
+                "valid": False,
+                "error": "Invalid decision",
+                "result": None
+            }
+
+        if not isinstance(result["confidence"], (int, float)):
+            return {
+                "valid": False,
+                "error": "Confidence must be numeric",
+                "result": None
+            }
+
+        if not 0 <= result["confidence"] <= 100:
+            return {
+                "valid": False,
+                "error": "Confidence must be between 0 and 100",
+                "result": None
+            }
+
+        if result["risk"] not in [
+            "LOW",
+            "MEDIUM",
+            "HIGH"
+        ]:
+            return {
+                "valid": False,
+                "error": "Invalid risk level",
+                "result": None
+            }
+
+        return {
+            "valid": True,
+            "error": None,
+            "result": result
+        }
 
     except json.JSONDecodeError:
         return {
             "valid": False,
             "error": "AI returned invalid JSON",
-            "result": None,
+            "result": None
         }
-
-    required_fields = [
-        "decision",
-        "selected_invoice",
-        "confidence",
-        "reason",
-        "risk",
-    ]
-
-    for field in required_fields:
-
-        if field not in result:
-
-            return {
-                "valid": False,
-                "error": (
-                    f"Missing required field: {field}"
-                ),
-                "result": None,
-            }
-
-    valid_decisions = [
-        "MATCH",
-        "REVIEW",
-        "EXCEPTION",
-    ]
-
-    if result["decision"] not in valid_decisions:
-
-        return {
-            "valid": False,
-            "error": "Invalid decision returned by AI",
-            "result": None,
-        }
-
-    valid_risks = [
-        "LOW",
-        "MEDIUM",
-        "HIGH",
-    ]
-
-    if result["risk"] not in valid_risks:
-
-        return {
-            "valid": False,
-            "error": "Invalid risk returned by AI",
-            "result": None,
-        }
-
-    try:
-
-        confidence = float(
-            result["confidence"]
-        )
-
-    except (TypeError, ValueError):
-
-        return {
-            "valid": False,
-            "error": "Confidence must be numeric",
-            "result": None,
-        }
-
-    if not 0 <= confidence <= 100:
-
-        return {
-            "valid": False,
-            "error": (
-                "Confidence must be between 0 and 100"
-            ),
-            "result": None,
-        }
-
-    return {
-        "valid": True,
-        "error": None,
-        "result": result,
-    }
 
 def ask_ai(prompt):
     """

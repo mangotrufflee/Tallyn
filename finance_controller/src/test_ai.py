@@ -1,65 +1,80 @@
 import pandas as pd
 
-from matcher import find_top_candidates
-from ai_reasoner import build_ai_prompt, ask_ai, validate_ai_response
+print("=" * 70)
+print("AI RECONCILIATION TEST")
+print("=" * 70)
 
+print("\n1. Script started")
+
+from matcher import find_top_candidates
+print("2. Matcher imported")
+
+from ai_reasoner import build_ai_prompt, ask_ai, validate_ai_response
+print("3. AI reasoner imported")
 
 # Load data
-bank = pd.read_csv(
-    "data/bank.csv",
-    parse_dates=["date"]
-)
+bank = pd.read_csv("data/bank.csv")
+erp = pd.read_csv("data/erp.csv")
 
-erp = pd.read_csv(
-    "data/erp.csv",
-    parse_dates=["date"]
-)
+bank["date"] = pd.to_datetime(bank["date"])
+erp["date"] = pd.to_datetime(erp["date"])
 
+print("4. Data loaded")
 
-# Pick ONE transaction
-bank_row = bank.iloc[0]
+# Test transaction
+transaction_id = "B0375"
 
+bank_row = bank[bank["transaction_id"] == transaction_id].iloc[0]
 
-# Find top 5 deterministic candidates
+print("\n5. Transaction selected")
+print(bank_row)
+
+# Find candidates
 candidates = find_top_candidates(
     bank_row,
     erp,
     top_n=5
 )
 
+print("\n6. Candidates found")
 
-# Build AI prompt
+for i, candidate in enumerate(candidates, start=1):
+    print(f"\nCandidate {i}:")
+    print(candidate)
+
+# Build prompt
 prompt = build_ai_prompt(
     bank_row,
     candidates
 )
 
+print("\n7. Prompt created")
+
+# PRINT EXACT PROMPT
+print("\n" + "=" * 70)
+print("PROMPT SENT TO AI")
+print("=" * 70)
+print(prompt)
+print("=" * 70)
 
 # Ask AI
+print("\n8. Sending prompt to Qwen...")
+
 raw_response = ask_ai(prompt)
 
-
-# Validate AI response
-result = validate_ai_response(
-    raw_response
-)
-
-
-print()
+print("\n" + "=" * 70)
+print("AI RAW RESPONSE")
 print("=" * 70)
-print("AI RECONCILIATION TEST")
-print("=" * 70)
-
-print()
-print("Transaction:")
-print(bank_row["transaction_id"])
-
-print()
-print("AI RAW RESPONSE:")
 print(raw_response)
 
-print()
-print("VALIDATION RESULT:")
-print(result)
+# Validate
+validation = validate_ai_response(raw_response)
 
+print("\n" + "=" * 70)
+print("VALIDATION RESULT")
+print("=" * 70)
+print(validation)
+
+print("\n" + "=" * 70)
+print("TEST COMPLETE")
 print("=" * 70)

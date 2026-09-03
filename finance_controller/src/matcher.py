@@ -3,10 +3,13 @@ from rapidfuzz.fuzz import ratio
 
 
 def normalize_vendor(name):
-    """Normalize vendor names."""
+    """
+    Normalize vendor names into a comparable form.
+    """
 
     name = str(name).lower().strip()
 
+    # Remove common company suffixes
     replacements = [
         "private limited",
         "pvt ltd",
@@ -15,12 +18,34 @@ def normalize_vendor(name):
         "limited",
         "ltd.",
         "ltd",
+        "inc.",
+        "inc",
+        "corporation",
+        "corp.",
+        "corp",
+        "services",
+        "service",
+        "software",
+        "india",
+        "internet",
+        "platforms",
+        "entertainment",
     ]
 
     for replacement in replacements:
-        name = name.replace(replacement, "")
+        name = name.replace(
+            replacement,
+            ""
+        )
 
-    name = " ".join(name.split())
+    # Remove punctuation
+    name = name.replace(".", "")
+    name = name.replace(",", "")
+
+    # Normalize whitespace
+    name = " ".join(
+        name.split()
+    )
 
     return name
 
@@ -72,9 +97,30 @@ def amount_similarity(bank_amount, erp_amount):
     else:
         return 0
 
+def reference_similarity(bank_row, erp_row):
+    """
+    Check whether the ERP reference directly matches
+    the bank transaction ID.
+    """
+
+    bank_id = str(
+        bank_row["transaction_id"]
+    ).strip().lower()
+
+    erp_reference = str(
+        erp_row["reference"]
+    ).strip().lower()
+
+    if bank_id == erp_reference:
+        return 100
+
+    return 0
+
 
 def calculate_match_score(bank_row, erp_row):
-    """Calculate combined matching score."""
+    """
+    Calculate combined reconciliation score.
+    """
 
     amount_score = amount_similarity(
         bank_row["amount"],
@@ -91,10 +137,43 @@ def calculate_match_score(bank_row, erp_row):
         erp_row["date"]
     )
 
+    reference_score = reference_similarity(
+        bank_row,
+        erp_row
+    )
+
+    exact_amount = (
+        bank_row["amount"]
+        == erp_row["amount"]
+    )
+
+    exact_date = (
+        bank_row["date"]
+        == erp_row["date"]
+    )
+
+    # Base score
     final_score = (
-        amount_score * 0.50
-        + vendor_score * 0.30
-        + date_score * 0.20
+        amount_score * 0.40
+        + vendor_score * 0.25
+        + date_score * 0.15
+        + reference_score * 0.20
+    )
+
+    # Strong evidence bonuses
+    if exact_amount and exact_date:
+        final_score += 5
+
+    if exact_amount and vendor_score >= 70:
+        final_score += 5
+
+    # Direct reference match is extremely strong evidence
+    if reference_score == 100:
+        final_score = 100
+
+    final_score = min(
+        final_score,
+        100
     )
 
     return {
@@ -102,8 +181,8 @@ def calculate_match_score(bank_row, erp_row):
         "amount_score": amount_score,
         "vendor_score": vendor_score,
         "date_score": date_score,
+        "reference_score": reference_score,
     }
-
 
 def find_top_candidates(bank_row, erp, top_n=5):
     """
@@ -127,9 +206,11 @@ def find_top_candidates(bank_row, erp, top_n=5):
             "date": erp_row["date"],
             "amount": erp_row["amount"],
             "vendor": erp_row["vendor"],
+            "reference": erp_row["reference"],
             "amount_score": scores["amount_score"],
             "vendor_score": scores["vendor_score"],
             "date_score": scores["date_score"],
+            "reference_score": scores["reference_score"],
             "final_score": scores["final_score"],
         })
 
