@@ -141,11 +141,8 @@ def main():
     # --------------------------------------------------
 
     uncertain_results = results[
-        results["status"].isin([
-            "WARNING",
-            "EXCEPTION"
-        ])
-    ].head(3)
+    results["status"].isin(["WARNING", "EXCEPTION"])
+]
 
     print()
     print("=" * 70)
@@ -158,8 +155,8 @@ def main():
     )
 
     print(
-        f"Sending only {len(uncertain_results)} "
-        f"transactions to AI for this test."
+        f"Sending {len(uncertain_results)} "
+        f"transactions to AI."
     )
 
     # --------------------------------------------------

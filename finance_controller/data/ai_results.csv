@@ -1,4 +1,41 @@
 ai_decision,ai_invoice,ai_confidence,ai_reason,ai_risk,transaction_id,deterministic_invoice,deterministic_status,deterministic_confidence
-REVIEW,,47,"The transaction matches the ERP candidate on reference, amount, and date, but there is no strong vendor similarity.",LOW,B0491,,EXCEPTION,47.69
-MATCH,INV0210_DUP,95,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0210,INV0210_DUP,WARNING,100.0
-REVIEW,,0,The transaction does not match any provided ERP candidate based on the provided evidence.,LOW,B0416,,EXCEPTION,46.25
+REVIEW,,0.0,The transaction does not match any provided ERP candidate based on the provided evidence.,LOW,B0491,,EXCEPTION,47.69
+MATCH,INV0210_DUP,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0210,INV0210_DUP,WARNING,100.0
+REVIEW,,0.0,The transaction does not match any provided ERP candidate based on the provided evidence.,LOW,B0416,,EXCEPTION,46.25
+MATCH,INV0183,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0183,INV0183,WARNING,100.0
+MATCH,INV0324,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0324,INV0324_DUP,WARNING,100.0
+MATCH,INV0342_DUP,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0342,INV0342_DUP,WARNING,100.0
+REVIEW,,55.0,"The transaction matches the ERP candidate on reference, amount, and date but not on vendor similarity.",LOW,B0269,INV0432,WARNING,70.0
+MATCH,INV0181_DUP,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0181,INV0181_DUP,WARNING,100.0
+REVIEW,,55.0,"The transaction does not have a perfect match based on the provided candidates. There are no candidates with exact reference, amount, date, and vendor similarity.",LOW,B0313,INV0166,WARNING,70.0
+REVIEW,,47.0,"The transaction matches the ERP candidate on reference, amount, and date, but the vendor similarity is low.",LOW,B0363,,EXCEPTION,47.69
+MATCH,INV0302,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0302,INV0302,WARNING,100.0
+MATCH,INV0221,100.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0221,INV0221,WARNING,100.0
+MATCH,INV0418_DUP,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0418,INV0418_DUP,WARNING,100.0
+REVIEW,,50.0,The transaction does not match any provided ERP candidate based on the provided evidence.,LOW,B0127,,EXCEPTION,69.52
+REVIEW,,58.25,The transaction does not match any provided ERP candidate based on the provided evidence.,LOW,B0032,,EXCEPTION,58.25
+REVIEW,,55.0,"The transaction requires review due to conflicting evidence. Multiple candidates have strong signals but no single candidate has exact reference, amount, date, and vendor match.",LOW,B0429,INV0091,WARNING,70.0
+REVIEW,,55.0,The transaction does not match any of the provided ERP candidates based on the provided evidence hierarchy.,LOW,B0176,,EXCEPTION,55.79
+MATCH,INV0480,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0145,INV0480,WARNING,70.0
+REVIEW,,52.5,The transaction does not match any provided ERP candidate based on the provided evidence.,LOW,B0366,,EXCEPTION,52.5
+MATCH,INV0368,100.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0368,INV0368,WARNING,100.0
+MATCH,INV0178,100.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0178,INV0178,WARNING,100.0
+REVIEW,,50.0,"The transaction matches the ERP candidate on reference, amount, and date, but there is no strong vendor similarity.",LOW,B0082,,EXCEPTION,63.75
+REVIEW,,55.0,The transaction requires review due to a material amount discrepancy and conflicting evidence.,LOW,B0470,INV0479,WARNING,82.0
+REVIEW,,53.0,The transaction does not match any provided ERP candidate due to material amount discrepancy and lack of other strong signals.,LOW,B0259,,EXCEPTION,53.17
+MATCH,INV0350_DUP,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0350,INV0350_DUP,WARNING,100.0
+REVIEW,,55.0,"The transaction matches the ERP candidate on reference, amount, and date but not on vendor.",LOW,B0225,,EXCEPTION,55.79
+REVIEW,,0.0,The transaction does not match any of the provided ERP candidates based on the provided evidence.,LOW,B0461,,EXCEPTION,47.14
+REVIEW,,0.0,The transaction does not match any provided ERP candidate due to material amount discrepancy and lack of other strong signals.,MEDIUM,B0187,,EXCEPTION,47.69
+REVIEW,,50.0,"The transaction matches the ERP candidate on reference, amount, and date, but there is no strong vendor similarity.",LOW,B0036,INV0036,WARNING,100.0
+MATCH,INV0052_DUP,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0052,INV0052_DUP,WARNING,100.0
+REVIEW,,0.0,The transaction does not match any provided ERP candidate based on the provided evidence.,LOW,B0268,,EXCEPTION,63.75
+MATCH,INV0028_DUP,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0028,INV0028_DUP,WARNING,100.0
+REVIEW,,56.67,"The transaction matches the ERP candidate on reference, amount, and date, but the vendor similarity is low (25.0).",LOW,B0231,,EXCEPTION,66.25
+MATCH,INV0426,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0426,INV0426,WARNING,100.0
+REVIEW,,50.0,"The transaction does not have exact reference, amount, date, or vendor match with any provided ERP candidates. There is a material amount difference (₹22,000 vs ₹22,050).",MEDIUM,B0044,INV0443,WARNING,70.0
+REVIEW,,0.0,The transaction does not match any provided ERP candidate based on the provided evidence.,LOW,B0191,INV0041,WARNING,70.0
+REVIEW,,50.0,"The transaction matches the ERP candidate on reference, amount, and date, but there is no strong vendor similarity.",LOW,B0053,INV0374,WARNING,70.0
+MATCH,INV0097,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0089,INV0097,WARNING,70.0
+MATCH,INV0001,95.0,"The transaction matches the ERP candidate on reference, amount, date and vendor.",LOW,B0331,,EXCEPTION,64.17
+REVIEW,,50.0,The transaction does not match any provided ERP candidate due to material amount discrepancy and conflicting evidence.,MEDIUM,B0021,INV0185,WARNING,70.0

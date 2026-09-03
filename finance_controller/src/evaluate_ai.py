@@ -1,11 +1,43 @@
 import pandas as pd
 
+from matcher import find_best_match, classify_match
 
-def calculate_accuracy(
-    predictions,
-    ground_truth,
-    prediction_column
-):
+
+def run_deterministic_reconciliation(bank, erp):
+    """
+    Run the deterministic matcher across all bank transactions.
+    """
+
+    results = []
+
+    for _, bank_row in bank.iterrows():
+
+        best_match, best_score, second_best_score, score_details = (
+            find_best_match(bank_row, erp)
+        )
+
+        decision = classify_match(
+            best_score,
+            second_best_score,
+            best_match
+        )
+
+        if best_match is not None:
+            invoice = best_match["invoice_id"]
+        else:
+            invoice = None
+
+        results.append({
+            "transaction_id": bank_row["transaction_id"],
+            "deterministic_invoice": invoice,
+            "deterministic_decision": decision,
+            "deterministic_score": best_score
+        })
+
+    return pd.DataFrame(results)
+
+
+def calculate_accuracy(predictions, ground_truth, prediction_column):
     """
     Calculate invoice-selection accuracy.
 
@@ -37,143 +69,208 @@ def main():
     print("=" * 70)
 
     # --------------------------------------------------
-    # 1. LOAD RESULTS
+    # 1. LOAD DATA
     # --------------------------------------------------
 
-    ai_results = pd.read_csv(
-        "data/ai_results.csv"
-    )
+    print()
+    print("Loading data...")
 
-    ground_truth = pd.read_csv(
-        "data/verification.csv"
-    )
+    bank = pd.read_csv("data/bank.csv")
+    erp = pd.read_csv("data/erp.csv")
+    ground_truth = pd.read_csv("data/verification.csv")
+
+    bank["date"] = pd.to_datetime(bank["date"])
+    erp["date"] = pd.to_datetime(erp["date"])
+
+    print(f"Bank records       : {len(bank)}")
+    print(f"ERP records        : {len(erp)}")
+    print(f"Verification rows  : {len(ground_truth)}")
 
     # --------------------------------------------------
-    # 2. DETERMINISTIC EVALUATION
+    # 2. RUN DETERMINISTIC MATCHING ON ALL 500
+    # --------------------------------------------------
+
+    print()
+    print("Running deterministic reconciliation...")
+
+    deterministic_results = run_deterministic_reconciliation(
+        bank,
+        erp
+    )
+
+    print("Deterministic reconciliation completed.")
+
+    # --------------------------------------------------
+    # 3. EVALUATE DETERMINISTIC RESULTS
     # --------------------------------------------------
 
     deterministic_accuracy, comparison = (
         calculate_accuracy(
-            ai_results,
+            deterministic_results,
             ground_truth,
             "deterministic_invoice"
         )
     )
 
     # --------------------------------------------------
-    # 3. AI EVALUATION
+    # 4. LOAD AI RESULTS
     # --------------------------------------------------
 
-    ai_accuracy, comparison = (
-        calculate_accuracy(
-            ai_results,
-            ground_truth,
-            "ai_invoice"
+    try:
+        ai_results = pd.read_csv(
+            "data/ai_results.csv"
         )
-    )
+
+        comparison = comparison.merge(
+            ai_results[
+                [
+                    "transaction_id",
+                    "ai_decision",
+                    "ai_invoice",
+                    "ai_confidence",
+                    "ai_risk",
+                    "ai_reason"
+                ]
+            ],
+            on="transaction_id",
+            how="left"
+        )
+
+    except FileNotFoundError:
+
+        print()
+        print("No AI results found.")
+
+        ai_results = pd.DataFrame()
 
     # --------------------------------------------------
-    # 4. PRINT RESULTS
+    # 5. AI EVALUATION
     # --------------------------------------------------
+
+    if len(ai_results) > 0:
+
+        ai_evaluated = comparison[
+            comparison["ai_decision"].notna()
+        ].copy()
+
+        if len(ai_evaluated) > 0:
+
+            ai_evaluated["ai_correct"] = (
+                ai_evaluated["ai_invoice"]
+                == ai_evaluated["expected_invoice"]
+            )
+
+            ai_accuracy = (
+                ai_evaluated["ai_correct"].mean()
+                * 100
+            )
+
+        else:
+            ai_accuracy = 0
+
+    else:
+
+        ai_evaluated = pd.DataFrame()
+        ai_accuracy = 0
+
+    # --------------------------------------------------
+    # 6. PRINT OVERALL RESULTS
+    # --------------------------------------------------
+
+    print()
+    print("=" * 70)
+    print("DETERMINISTIC BASELINE")
+    print("=" * 70)
 
     print()
     print(
         f"Transactions evaluated : "
-        f"{len(ai_results)}"
+        f"{len(comparison)}"
     )
 
-    print()
     print(
-        f"Deterministic accuracy  : "
+        f"Correct matches        : "
+        f"{comparison['correct'].sum()}"
+    )
+
+    print(
+        f"Accuracy               : "
         f"{deterministic_accuracy:.2f}%"
     )
 
-    print(
-        f"AI accuracy             : "
-        f"{ai_accuracy:.2f}%"
-    )
+    # --------------------------------------------------
+    # 7. DETERMINISTIC DECISION COUNTS
+    # --------------------------------------------------
 
     print()
+    print("DETERMINISTIC DECISIONS")
 
-    improvement = (
-        ai_accuracy
-        - deterministic_accuracy
+    decision_counts = (
+        comparison["deterministic_decision"]
+        .value_counts()
     )
 
-    print(
-        f"Accuracy improvement    : "
-        f"{improvement:+.2f} percentage points"
-    )
+    for decision, count in decision_counts.items():
+
+        print(
+            f"{decision:<20}: {count}"
+        )
 
     # --------------------------------------------------
-    # 5. SHOW TRANSACTION-LEVEL RESULTS
+    # 8. AI RESULTS
     # --------------------------------------------------
 
     print()
     print("=" * 70)
-    print("TRANSACTION-LEVEL COMPARISON")
+    print("AI EVALUATION")
     print("=" * 70)
 
-    for _, row in comparison.iterrows():
+    print()
+    print(
+        f"AI transactions evaluated : "
+        f"{len(ai_evaluated)}"
+    )
+
+    if len(ai_evaluated) > 0:
+
+        print(
+            f"Correct AI matches        : "
+            f"{ai_evaluated['ai_correct'].sum()}"
+        )
+
+        print(
+            f"AI accuracy               : "
+            f"{ai_accuracy:.2f}%"
+        )
+
+    else:
+
+        print("No AI transactions available.")
+
+    # --------------------------------------------------
+    # 9. AI DECISION COUNTS
+    # --------------------------------------------------
+
+    if len(ai_evaluated) > 0:
 
         print()
-        print(
-            f"Transaction: "
-            f"{row['transaction_id']}"
+        print("AI DECISIONS")
+
+        ai_decision_counts = (
+            ai_evaluated["ai_decision"]
+            .value_counts()
         )
 
-        print(
-            f"Expected invoice      : "
-            f"{row['expected_invoice']}"
-        )
+        for decision, count in (
+            ai_decision_counts.items()
+        ):
 
-        print(
-            f"Deterministic invoice : "
-            f"{row['deterministic_invoice']}"
-        )
-
-        print(
-            f"AI invoice            : "
-            f"{row['ai_invoice']}"
-        )
-
-        print(
-            f"AI decision           : "
-            f"{row['ai_decision']}"
-        )
-
-        print(
-            f"AI confidence         : "
-            f"{row['ai_confidence']}"
-        )
-
-        print(
-            f"AI risk               : "
-            f"{row['ai_risk']}"
-        )
-
-        deterministic_correct = (
-            row["deterministic_invoice"]
-            == row["expected_invoice"]
-        )
-
-        ai_correct = (
-            row["ai_invoice"]
-            == row["expected_invoice"]
-        )
-
-        print(
-            f"Deterministic correct : "
-            f"{deterministic_correct}"
-        )
-
-        print(
-            f"AI correct            : "
-            f"{ai_correct}"
-        )
+            print(
+                f"{decision:<20}: {count}"
+            )
 
     # --------------------------------------------------
-    # 6. SAVE EVALUATION
+    # 10. SAVE FULL EVALUATION
     # --------------------------------------------------
 
     comparison.to_csv(
@@ -188,6 +285,8 @@ def main():
     )
 
     print()
+    print("=" * 70)
+    print("EVALUATION COMPLETE")
     print("=" * 70)
 
 
