@@ -105,9 +105,12 @@ def calculate_match_score(bank_row, erp_row):
     }
 
 
-def find_best_match(bank_row, erp):
+def find_top_candidates(bank_row, erp, top_n=5):
     """
-    Find the best and second-best ERP candidates.
+    Find the top N ERP candidates for a bank transaction.
+
+    The deterministic matcher ranks candidates.
+    The AI will later reason over these candidates.
     """
 
     candidates = []
@@ -120,19 +123,39 @@ def find_best_match(bank_row, erp):
         )
 
         candidates.append({
-            "erp_row": erp_row,
-            "scores": scores,
+            "invoice_id": erp_row["invoice_id"],
+            "date": erp_row["date"],
+            "amount": erp_row["amount"],
+            "vendor": erp_row["vendor"],
+            "amount_score": scores["amount_score"],
+            "vendor_score": scores["vendor_score"],
+            "date_score": scores["date_score"],
+            "final_score": scores["final_score"],
         })
 
-    # Sort highest score first
     candidates.sort(
-        key=lambda x: x["scores"]["final_score"],
+        key=lambda x: x["final_score"],
         reverse=True
     )
 
-    # No candidates
-    if len(candidates) == 0:
+    return candidates[:top_n]
 
+
+def find_best_match(bank_row, erp):
+    """
+    Find the best ERP candidate.
+
+    This function is kept for compatibility with
+    the existing reconciliation pipeline.
+    """
+
+    candidates = find_top_candidates(
+        bank_row,
+        erp,
+        top_n=5
+    )
+
+    if len(candidates) == 0:
         return (
             None,
             0,
@@ -145,30 +168,26 @@ def find_best_match(bank_row, erp):
             },
         )
 
-    # Best candidate
     best_candidate = candidates[0]
 
-    best_match = best_candidate["erp_row"]
+    best_score = best_candidate["final_score"]
 
-    best_scores = best_candidate["scores"]
-
-    best_score = best_scores["final_score"]
-
-    # Second-best candidate
     if len(candidates) > 1:
-
-        second_best_score = (
-            candidates[1]["scores"]["final_score"]
-        )
-
+        second_best_score = candidates[1]["final_score"]
     else:
-
         second_best_score = 0
 
-    # Do not accept very weak matches
-    if best_score < 70:
+    best_match = None
 
-        best_match = None
+    if best_score >= 70:
+        best_match = best_candidate
+
+    best_scores = {
+        "final_score": best_candidate["final_score"],
+        "amount_score": best_candidate["amount_score"],
+        "vendor_score": best_candidate["vendor_score"],
+        "date_score": best_candidate["date_score"],
+    }
 
     return (
         best_match,
@@ -286,9 +305,12 @@ def reconcile(bank, erp):
             score,
             second_best_score,
             scores,
-        ) = find_best_match(
-            bank_row,
-            erp
+        ) = find_best_match(bank_row, erp)
+
+        candidates = find_top_candidates(
+            bank_row, 
+            erp,
+            top_n=5
         )
 
         status = classify_match(
