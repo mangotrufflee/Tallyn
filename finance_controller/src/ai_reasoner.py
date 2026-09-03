@@ -1,5 +1,5 @@
 import json
-
+from openai import OpenAI
 
 def build_ai_prompt(bank_row, candidates):
     """
@@ -246,3 +246,40 @@ def validate_ai_response(response):
         "error": None,
         "result": result,
     }
+
+def ask_ai(prompt):
+    """
+    Send the reconciliation prompt to Qwen running locally
+    through Ollama.
+    """
+
+    print("10. Connecting to local Qwen...")
+
+    client = OpenAI(
+        base_url="http://localhost:11434/v1",
+        api_key="ollama"
+    )
+
+    print("11. Sending request to Qwen...")
+
+    response = client.chat.completions.create(
+        model="qwen2.5:3b",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a cautious finance "
+                    "reconciliation assistant."
+                )
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0
+    )
+
+    print("12. Response received")
+
+    return response.choices[0].message.content

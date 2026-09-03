@@ -1,264 +1,335 @@
 import time
+
 import pandas as pd
 
-from matcher import reconcile
-from evaluator import evaluate_predictions
-
-
-# ============================================================
-# 1. LOAD DATA
-# ============================================================
-
-bank = pd.read_csv(
-    "data/bank.csv"
-)
-
-erp = pd.read_csv(
-    "data/erp.csv"
-)
-
-ground_truth = pd.read_csv(
-    "data/verification.csv"
-)
-
-print("Bank records:", len(bank))
-print("ERP records:", len(erp))
-print("Ground truth records:", len(ground_truth))
-
-print("\nGround truth sample:")
-print(ground_truth.head())
-
-print("\nGround truth columns:")
-print(ground_truth.columns.tolist())
-
-# ============================================================
-# 2. CONVERT DATES
-# ============================================================
-
-bank["date"] = pd.to_datetime(
-    bank["date"]
-)
-
-erp["date"] = pd.to_datetime(
-    erp["date"]
+from matcher import reconcile, find_top_candidates
+from ai_reasoner import (
+    build_ai_prompt,
+    ask_ai,
+    validate_ai_response,
 )
 
 
-# ============================================================
-# 3. START RECONCILIATION
-# ============================================================
+def run_ai_on_transaction(bank_row, erp):
+    """
+    Send one uncertain transaction to the local LLM.
+    """
 
-print()
-print("Running reconciliation...")
-print()
-
-
-start_time = time.perf_counter()
-
-
-results_df = reconcile(
-    bank,
-    erp
-)
-
-
-end_time = time.perf_counter()
-
-
-# ============================================================
-# 4. CALCULATE PROCESSING PERFORMANCE
-# ============================================================
-
-processing_time = (
-    end_time - start_time
-)
-
-records_processed = len(bank)
-
-if processing_time > 0:
-
-    throughput = (
-        records_processed
-        / processing_time
+    candidates = find_top_candidates(
+        bank_row,
+        erp,
+        top_n=5
     )
 
-else:
+    prompt = build_ai_prompt(
+        bank_row,
+        candidates
+    )
 
-    throughput = 0
+    raw_response = ask_ai(prompt)
+
+    validation = validate_ai_response(
+        raw_response
+    )
+
+    if not validation["valid"]:
+        return {
+            "ai_decision": "EXCEPTION",
+            "ai_invoice": None,
+            "ai_confidence": 0,
+            "ai_reason": validation["error"],
+            "ai_risk": "HIGH",
+        }
+
+    result = validation["result"]
+
+    return {
+        "ai_decision": result["decision"],
+        "ai_invoice": result["selected_invoice"],
+        "ai_confidence": result["confidence"],
+        "ai_reason": result["reason"],
+        "ai_risk": result["risk"],
+    }
 
 
-# ============================================================
-# 5. EVALUATE RESULTS
-# ============================================================
+def main():
 
-(
-    metrics,
-    evaluation_df,
-    incorrect_predictions
-) = evaluate_predictions(
-    results_df,
-    ground_truth
-)
+    print()
+    print("=" * 70)
+    print("AI FINANCE CONTROLLER")
+    print("=" * 70)
 
+    # --------------------------------------------------
+    # 1. LOAD DATA
+    # --------------------------------------------------
 
-# ============================================================
-# 6. DISPLAY RECONCILIATION RESULTS
-# ============================================================
+    print()
+    print("Loading data...")
 
-print("=" * 80)
-print("RECONCILIATION RESULTS")
-print("=" * 80)
+    bank = pd.read_csv(
+        "data/bank.csv",
+        parse_dates=["date"]
+    )
 
-print(
-    results_df[
-        [
-            "transaction_id",
-            "matched_invoice",
-            "confidence",
-            "second_best_score",
-            "confidence_margin",
-            "status",
-            "reason"
+    erp = pd.read_csv(
+        "data/erp.csv",
+        parse_dates=["date"]
+    )
+
+    ground_truth = pd.read_csv(
+        "data/verification.csv"
+    )
+
+    print(f"Bank records: {len(bank)}")
+    print(f"ERP records: {len(erp)}")
+    print(f"Ground truth records: {len(ground_truth)}")
+
+    # --------------------------------------------------
+    # 2. RUN DETERMINISTIC MATCHER
+    # --------------------------------------------------
+
+    print()
+    print("Running deterministic reconciliation...")
+
+    start_time = time.time()
+
+    results = reconcile(
+        bank,
+        erp
+    )
+
+    deterministic_time = time.time() - start_time
+
+    print(
+        f"Deterministic reconciliation completed "
+        f"in {deterministic_time:.2f} seconds"
+    )
+
+    # --------------------------------------------------
+    # 3. SHOW DETERMINISTIC SUMMARY
+    # --------------------------------------------------
+
+    print()
+    print("=" * 70)
+    print("DETERMINISTIC RESULTS")
+    print("=" * 70)
+
+    status_counts = results["status"].value_counts()
+
+    matched_count = status_counts.get(
+        "MATCHED",
+        0
+    )
+
+    warning_count = status_counts.get(
+        "WARNING",
+        0
+    )
+
+    exception_count = status_counts.get(
+        "EXCEPTION",
+        0
+    )
+
+    print(f"Total transactions : {len(results)}")
+    print(f"MATCHED            : {matched_count}")
+    print(f"WARNING            : {warning_count}")
+    print(f"EXCEPTION          : {exception_count}")
+
+    # --------------------------------------------------
+    # 4. SELECT UNCERTAIN TRANSACTIONS
+    # --------------------------------------------------
+
+    uncertain_results = results[
+        results["status"].isin([
+            "WARNING",
+            "EXCEPTION"
+        ])
+    ].head(3)
+
+    print()
+    print("=" * 70)
+    print("AI GATE")
+    print("=" * 70)
+
+    print(
+        f"Uncertain transactions available: "
+        f"{warning_count + exception_count}"
+    )
+
+    print(
+        f"Sending only {len(uncertain_results)} "
+        f"transactions to AI for this test."
+    )
+
+    # --------------------------------------------------
+    # 5. SEND UNCERTAIN TRANSACTIONS TO AI
+    # --------------------------------------------------
+
+    ai_results = []
+
+    for _, result_row in uncertain_results.iterrows():
+
+        transaction_id = result_row[
+            "transaction_id"
         ]
-    ].to_string(index=False)
-)
 
+        print()
+        print("-" * 70)
+        print(
+            f"Sending {transaction_id} to local Qwen..."
+        )
 
-# ============================================================
-# 7. DISPLAY PERFORMANCE REPORT
-# ============================================================
+        # Find original bank transaction
+        bank_match = bank[
+            bank["transaction_id"]
+            == transaction_id
+        ]
 
-print()
-print("=" * 80)
-print("PERFORMANCE REPORT")
-print("=" * 80)
+        if bank_match.empty:
 
-print(
-    f"Records processed: "
-    f"{metrics['total_records']}"
-)
+            print(
+                f"Could not find bank transaction "
+                f"{transaction_id}"
+            )
 
-print(
-    f"Matched: "
-    f"{metrics['matched_records']}"
-)
+            continue
 
-print(
-    f"Warnings: "
-    f"{metrics['warning_records']}"
-)
+        bank_row = bank_match.iloc[0]
 
-print(
-    f"Exceptions: "
-    f"{metrics['exception_records']}"
-)
+        # Run AI
+        ai_result = run_ai_on_transaction(
+            bank_row,
+            erp
+        )
 
-print()
+        ai_result["transaction_id"] = (
+            transaction_id
+        )
 
-print(
-    f"Accuracy: "
-    f"{metrics['accuracy']}%"
-)
+        # Store deterministic result too
+        ai_result["deterministic_invoice"] = (
+            result_row["matched_invoice"]
+        )
 
-print(
-    f"Precision: "
-    f"{metrics['precision']}%"
-)
+        ai_result["deterministic_status"] = (
+            result_row["status"]
+        )
 
-print(
-    f"Recall: "
-    f"{metrics['recall']}%"
-)
+        ai_result["deterministic_confidence"] = (
+            result_row["confidence"]
+        )
 
-print(
-    f"F1 Score: "
-    f"{metrics['f1']}%"
-)
+        ai_results.append(
+            ai_result
+        )
 
-print()
+        # Print AI result
+        print()
+        print("AI DECISION")
+        print(
+            f"Decision   : "
+            f"{ai_result['ai_decision']}"
+        )
+        print(
+            f"Invoice    : "
+            f"{ai_result['ai_invoice']}"
+        )
+        print(
+            f"Confidence : "
+            f"{ai_result['ai_confidence']}"
+        )
+        print(
+            f"Risk       : "
+            f"{ai_result['ai_risk']}"
+        )
+        print(
+            f"Reason     : "
+            f"{ai_result['ai_reason']}"
+        )
 
-print(
-    f"Auto-resolution rate: "
-    f"{metrics['auto_resolution_rate']}%"
-)
+    # --------------------------------------------------
+    # 6. CREATE AI RESULTS DATAFRAME
+    # --------------------------------------------------
 
-print(
-    f"Warning rate: "
-    f"{metrics['warning_rate']}%"
-)
-
-print(
-    f"Exception rate: "
-    f"{metrics['exception_rate']}%"
-)
-
-print()
-
-print(
-    f"True positives: "
-    f"{metrics['true_positives']}"
-)
-
-print(
-    f"False positives: "
-    f"{metrics['false_positives']}"
-)
-
-print(
-    f"False negatives: "
-    f"{metrics['false_negatives']}"
-)
-
-print()
-
-print(
-    f"Processing time: "
-    f"{processing_time:.4f} seconds"
-)
-
-print(
-    f"Throughput: "
-    f"{throughput:.2f} records/second"
-)
-
-
-# ============================================================
-# 8. DISPLAY INCORRECT PREDICTIONS
-# ============================================================
-
-print()
-print("=" * 80)
-print("INCORRECT PREDICTIONS / EXCEPTIONS")
-print("=" * 80)
-
-
-if len(incorrect_predictions) == 0:
-
-    print(
-        "No incorrect predictions."
+    ai_results_df = pd.DataFrame(
+        ai_results
     )
 
-else:
+    # --------------------------------------------------
+    # 7. FINAL REPORT
+    # --------------------------------------------------
+
+    print()
+    print("=" * 70)
+    print("AI ASSISTED RECONCILIATION")
+    print("=" * 70)
 
     print(
-        incorrect_predictions[
-            [
-                "transaction_id",
-                "matched_invoice",
-                "expected_invoice",
-                "confidence",
-                "status",
-                "reason"
-            ]
-        ].to_string(index=False)
+        f"Total transactions       : "
+        f"{len(results)}"
     )
 
+    print(
+        f"Deterministic MATCHED    : "
+        f"{matched_count}"
+    )
 
-# ============================================================
-# 9. FINISH
-# ============================================================
+    print(
+        f"Deterministic WARNING    : "
+        f"{warning_count}"
+    )
 
-print()
-print("=" * 80)
-print("RECONCILIATION COMPLETE")
-print("=" * 80)
+    print(
+        f"Deterministic EXCEPTION  : "
+        f"{exception_count}"
+    )
+
+    print(
+        f"AI transactions tested   : "
+        f"{len(ai_results_df)}"
+    )
+
+    if not ai_results_df.empty:
+
+        print()
+        print("AI DECISION COUNTS")
+
+        ai_decision_counts = (
+            ai_results_df["ai_decision"]
+            .value_counts()
+        )
+
+        for decision, count in (
+            ai_decision_counts.items()
+        ):
+
+            print(
+                f"{decision:<20}: {count}"
+            )
+
+    # --------------------------------------------------
+    # 8. SAVE AI RESULTS
+    # --------------------------------------------------
+
+    if not ai_results_df.empty:
+
+        ai_results_df.to_csv(
+            "data/ai_results.csv",
+            index=False
+        )
+
+        print()
+        print(
+            "AI results saved to "
+            "data/ai_results.csv"
+        )
+
+    print()
+    print("=" * 70)
+    print("PIPELINE COMPLETE")
+    print("=" * 70)
+
+
+if __name__ == "__main__":
+    main()

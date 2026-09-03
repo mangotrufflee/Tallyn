@@ -1,0 +1,4 @@
+ai_decision,ai_invoice,ai_confidence,ai_reason,ai_risk,transaction_id,deterministic_invoice,deterministic_status,deterministic_confidence
+REVIEW,INV0001,85.0,"The amount, vendor and date strongly support the match, but there is a slight discrepancy in the vendor name.",LOW,B0362,INV0362,WARNING,81.35
+REVIEW,,89.2,"While the overall matching score is high, the date difference (2026-08-12 vs. 2026-08-08) is significant and requires further investigation.",MEDIUM,B0375,INV0375,WARNING,89.2
+REVIEW,,85.0,"The transaction amount is correct, but there are multiple candidates with similar scores and different vendors, which makes it difficult to identify a reliable match.",MEDIUM,B0156,,EXCEPTION,69.2
