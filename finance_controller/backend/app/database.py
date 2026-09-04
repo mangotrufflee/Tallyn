@@ -84,6 +84,42 @@ def initialize_database():
             WHERE updated_at IS NULL"""
         )
 
+        # --------------------------------------------------------
+        # Human review fields
+        # --------------------------------------------------------
+
+        if "review_status" not in columns:
+            cursor.execute(
+                """
+                ALTER TABLE reconciliation_results
+                ADD COLUMN review_status TEXT
+                """
+            )
+
+        if "review_decision" not in columns:
+            cursor.execute(
+                """
+                ALTER TABLE reconciliation_results
+                ADD COLUMN review_decision TEXT
+                """
+            )
+
+        if "reviewer_note" not in columns:
+            cursor.execute(
+                """
+                ALTER TABLE reconciliation_results
+                ADD COLUMN reviewer_note TEXT
+                """
+            )
+
+        if "reviewed_at" not in columns:
+            cursor.execute(
+                """
+                ALTER TABLE reconciliation_results
+                ADD COLUMN reviewed_at TEXT
+                """
+            )
+
     connection.commit()
     connection.close()
 

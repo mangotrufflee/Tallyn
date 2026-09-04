@@ -528,6 +528,218 @@ def get_summary():
         "exceptions": exceptions,
     }
 
+# ------------------------------------------------------------
+# Metrics
+# ------------------------------------------------------------
+
+@app.get("/metrics")
+def get_metrics():
+
+    connection = get_connection()
+
+    # ========================================================
+    # TOTAL TRANSACTIONS
+    # ========================================================
+
+    total = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM transactions
+        """
+    ).fetchone()[0]
+
+
+    # ========================================================
+    # DETERMINISTIC ACCURACY
+    # ========================================================
+
+    deterministic_rows = connection.execute(
+        """
+        SELECT
+            r.matched_invoice,
+            g.expected_invoice
+
+        FROM reconciliation_results r
+
+        LEFT JOIN ground_truth g
+        ON r.transaction_id = g.transaction_id
+
+        WHERE g.expected_invoice IS NOT NULL
+        """
+    ).fetchall()
+
+
+    deterministic_correct = 0
+
+    for row in deterministic_rows:
+
+        predicted = row["matched_invoice"]
+        expected = row["expected_invoice"]
+
+        if predicted is None:
+            continue
+
+        predicted = str(predicted).strip().upper()
+        expected = str(expected).strip().upper()
+
+        # Ground-truth files may contain duplicate suffixes
+        predicted_normalized = predicted.replace("_DUP", "")
+        expected_normalized = expected.replace("_DUP", "")
+
+        if predicted_normalized == expected_normalized:
+            deterministic_correct += 1
+
+
+    deterministic_accuracy = (
+        deterministic_correct / len(deterministic_rows) * 100
+        if deterministic_rows
+        else 0
+    )
+
+
+    # ========================================================
+    # AI RECOMMENDATIONS
+    # ========================================================
+
+    ai_recommendations = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM reconciliation_results
+
+        WHERE ai_decision = 'MATCH'
+        """
+    ).fetchone()[0]
+
+
+    # ========================================================
+    # GUARD-APPROVED AI MATCHES
+    # ========================================================
+
+    guard_approved = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM reconciliation_results
+
+        WHERE ai_decision = 'MATCH'
+        AND verification_decision = 'MATCHED'
+        """
+    ).fetchone()[0]
+
+
+    # ========================================================
+    # AI MATCHES BLOCKED BY GUARD
+    # ========================================================
+
+    ai_matches_blocked = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM reconciliation_results
+
+        WHERE ai_decision = 'MATCH'
+        AND verification_decision != 'MATCHED'
+        """
+    ).fetchone()[0]
+
+
+    # ========================================================
+    # GUARD APPROVAL ACCURACY
+    # ========================================================
+
+    approved_rows = connection.execute(
+        """
+        SELECT
+            r.ai_invoice,
+            g.expected_invoice
+
+        FROM reconciliation_results r
+
+        LEFT JOIN ground_truth g
+        ON r.transaction_id = g.transaction_id
+
+        WHERE r.ai_decision = 'MATCH'
+        AND r.verification_decision = 'MATCHED'
+        AND g.expected_invoice IS NOT NULL
+        """
+    ).fetchall()
+
+
+    guard_correct = 0
+
+    for row in approved_rows:
+
+        predicted = row["ai_invoice"]
+        expected = row["expected_invoice"]
+
+        if predicted is None:
+            continue
+
+        predicted = str(predicted).strip().upper()
+        expected = str(expected).strip().upper()
+
+        predicted_normalized = predicted.replace("_DUP", "")
+        expected_normalized = expected.replace("_DUP", "")
+
+        if predicted_normalized == expected_normalized:
+            guard_correct += 1
+
+
+    guard_approval_accuracy = (
+        guard_correct / len(approved_rows) * 100
+        if approved_rows
+        else 0
+    )
+
+
+    # ========================================================
+    # FINAL MATCH RATE
+    # ========================================================
+
+    final_matched = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM reconciliation_results
+
+        WHERE verification_decision = 'MATCHED'
+        """
+    ).fetchone()[0]
+
+
+    final_match_rate = (
+        final_matched / total * 100
+        if total
+        else 0
+    )
+
+
+    connection.close()
+
+
+    # ========================================================
+    # RESPONSE
+    # ========================================================
+
+    return {
+        "deterministic_accuracy": round(
+            deterministic_accuracy,
+            2
+        ),
+
+        "ai_recommendations": ai_recommendations,
+
+        "guard_approved": guard_approved,
+
+        "ai_matches_blocked": ai_matches_blocked,
+
+        "guard_approval_accuracy": round(
+            guard_approval_accuracy,
+            2
+        ),
+
+        "final_match_rate": round(
+            final_match_rate,
+            2
+        ),
+    }
 
 # ------------------------------------------------------------
 # Transactions

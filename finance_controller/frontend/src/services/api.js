@@ -10,6 +10,16 @@ export async function getSummary() {
   return response.json();
 }
 
+export async function getMetrics() {
+  const response = await fetch(`${API_BASE_URL}/metrics`);
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch metrics");
+  }
+
+  return response.json();
+}
+
 export async function getTransactions() {
   const response = await fetch(`${API_BASE_URL}/transactions`);
 
