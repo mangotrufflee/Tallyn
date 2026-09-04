@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[2]
+project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
 import random
@@ -363,17 +363,17 @@ def generate_data():
     # ========================================================
 
     bank_df.to_csv(
-        project_root / "data" / "bank.csv",
+        project_root / "data" / "raw" / "bank.csv",
         index=False
     )
 
     erp_df.to_csv(
-        project_root / "data" / "erp.csv",
+        project_root / "data" / "raw" / "erp.csv",
         index=False
     )
 
     ground_truth_df.to_csv(
-        project_root / "data" / "verification.csv",
+        project_root / "data" / "raw" / "verification.csv",
         index=False
     )
 

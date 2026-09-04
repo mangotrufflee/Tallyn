@@ -1,28 +1,25 @@
-import sqlite3
 from pathlib import Path
-import sys
 
 import pandas as pd
 
 from fastapi import FastAPI, HTTPException
 
-project_root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(project_root))
+project_root = Path(__file__).resolve().parents[2]
 
-from src.reconciliation.matcher import (
+from backend.app.reconciliation.matcher import (
     find_best_match,
     find_top_candidates,
     classify_match,
     get_exception_reason,
 )
 
-from src.ai.ai_reasoner import (
+from backend.app.ai.ai_reasoner import (
     build_ai_prompt,
     ask_ai,
     validate_ai_response,
 )
 
-from src.reconciliation.verification_guard import (
+from backend.app.reconciliation.verification_guard import (
     verify_ai_match,
     get_final_decision,
     verify_selected_candidate,
@@ -33,11 +30,13 @@ from src.reconciliation.verification_guard import (
 # CONFIGURATION
 # ============================================================
 
-DATABASE_PATH = project_root / "data" / "finance_controller.db"
-
-BANK_PATH = project_root / "data" / "bank.csv"
-ERP_PATH = project_root / "data" / "erp.csv"
-VERIFICATION_PATH = project_root / "data" / "verification.csv"
+from backend.app.database import (
+    get_connection,
+    initialize_database,
+    load_bank_data,
+    load_erp_data,
+    seed_database,
+)
 
 
 # ============================================================
@@ -49,291 +48,6 @@ app = FastAPI(
     description="AI-assisted financial reconciliation system",
     version="1.0.0",
 )
-
-
-# ============================================================
-# DATABASE
-# ============================================================
-
-def get_connection():
-    """
-    Opens a connection to the SQLite database.
-    """
-
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-    connection = sqlite3.connect(
-        DATABASE_PATH
-    )
-
-    connection.row_factory = sqlite3.Row
-
-    return connection
-
-
-def initialize_database():
-    """
-    Creates the SQLite tables if they do not already exist.
-    """
-
-    connection = get_connection()
-
-    cursor = connection.cursor()
-
-    # --------------------------------------------------------
-    # Bank transactions
-    # --------------------------------------------------------
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS transactions (
-
-            transaction_id TEXT PRIMARY KEY,
-
-            date TEXT NOT NULL,
-
-            counterparty TEXT,
-
-            amount REAL,
-
-            currency TEXT
-        )
-        """
-    )
-
-    # --------------------------------------------------------
-    # ERP records
-    # --------------------------------------------------------
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS erp_records (
-
-            invoice_id TEXT PRIMARY KEY,
-
-            reference TEXT,
-
-            date TEXT,
-
-            vendor TEXT,
-
-            amount REAL,
-
-            currency TEXT
-        )
-        """
-    )
-
-    # --------------------------------------------------------
-    # Ground truth
-    # --------------------------------------------------------
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ground_truth (
-
-            transaction_id TEXT PRIMARY KEY,
-
-            expected_invoice TEXT
-        )
-        """
-    )
-
-    # --------------------------------------------------------
-    # Reconciliation results
-    # --------------------------------------------------------
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS reconciliation_results (
-
-            transaction_id TEXT PRIMARY KEY,
-
-            matched_invoice TEXT,
-
-            match_score REAL,
-
-            deterministic_status TEXT,
-
-            reason TEXT,
-
-            ai_decision TEXT,
-
-            ai_invoice TEXT,
-
-            ai_confidence REAL,
-
-            ai_reason TEXT,
-
-            ai_risk TEXT,
-
-            verification_decision TEXT,
-
-            verification_reason TEXT,
-
-            verification_checks TEXT,
-
-            FOREIGN KEY (
-                transaction_id
-            )
-            REFERENCES transactions(transaction_id)
-        )
-        """
-    )
-
-    connection.commit()
-
-    connection.close()
-
-
-# ============================================================
-# LOAD CSV DATA INTO SQLITE
-# ============================================================
-
-def seed_database():
-    """
-    Loads the existing CSV datasets into SQLite.
-    """
-
-    bank = pd.read_csv(
-        BANK_PATH
-    )
-
-    erp = pd.read_csv(
-        ERP_PATH
-    )
-
-    verification = pd.read_csv(
-        VERIFICATION_PATH
-    )
-
-    connection = get_connection()
-
-    # --------------------------------------------------------
-    # Transactions
-    # --------------------------------------------------------
-
-    for _, row in bank.iterrows():
-
-        cursor = connection.cursor()
-
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO transactions (
-                transaction_id,
-                date,
-                counterparty,
-                amount,
-                currency
-            )
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                str(row["transaction_id"]),
-                str(row["date"]),
-                str(row["counterparty"]),
-                float(row["amount"]),
-                str(row.get("currency", "INR")),
-            ),
-        )
-
-    # --------------------------------------------------------
-    # ERP records
-    # --------------------------------------------------------
-
-    for _, row in erp.iterrows():
-
-        cursor = connection.cursor()
-
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO erp_records (
-                invoice_id,
-                reference,
-                date,
-                vendor,
-                amount,
-                currency
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                str(row["invoice_id"]),
-                str(row["reference"]),
-                str(row["date"]),
-                str(row["vendor"]),
-                float(row["amount"]),
-                str(row.get("currency", "INR")),
-            ),
-        )
-
-    # --------------------------------------------------------
-    # Ground truth
-    # --------------------------------------------------------
-
-    for _, row in verification.iterrows():
-
-        cursor = connection.cursor()
-
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO ground_truth (
-                transaction_id,
-                expected_invoice
-            )
-            VALUES (?, ?)
-            """,
-            (
-                str(row["transaction_id"]),
-                str(row["expected_invoice"]),
-            ),
-        )
-
-    connection.commit()
-
-    connection.close()
-
-
-# ============================================================
-# LOAD DATA FROM DATABASE
-# ============================================================
-
-def load_bank_data():
-
-    connection = get_connection()
-
-    rows = connection.execute(
-        """
-        SELECT *
-        FROM transactions
-        """
-    ).fetchall()
-
-    connection.close()
-
-    data = pd.DataFrame([dict(row) for row in rows])
-    if not data.empty:
-        data["date"] = pd.to_datetime(data["date"])
-    return data
-
-
-def load_erp_data():
-
-    connection = get_connection()
-
-    rows = connection.execute(
-        """
-        SELECT *
-        FROM erp_records
-        """
-    ).fetchall()
-
-    connection.close()
-
-    data = pd.DataFrame([dict(row) for row in rows])
-    if not data.empty:
-        data["date"] = pd.to_datetime(data["date"])
-    return data
 
 
 # ============================================================
@@ -679,10 +393,11 @@ def run_reconciliation():
                 ai_risk,
                 verification_decision,
                 verification_reason,
-                verification_checks
+                verification_checks,
+                updated_at
 
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
             (
                 str(row["transaction_id"]),

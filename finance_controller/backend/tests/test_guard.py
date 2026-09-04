@@ -1,23 +1,23 @@
 import sys
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[1]
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
 import pandas as pd
-from src.reconciliation.verification_guard import verify_ai_match
-from src.reconciliation.verification_guard import (
+from backend.app.reconciliation.verification_guard import verify_ai_match
+from backend.app.reconciliation.verification_guard import (
     verify_ai_match,
     get_final_decision
 )
 
 bank = pd.read_csv(
-    project_root / "data" / "bank.csv",
+    project_root / "data" / "raw" / "bank.csv",
     parse_dates=["date"]
 )
 
 erp = pd.read_csv(
-    project_root / "data" / "erp.csv",
+    project_root / "data" / "raw" / "erp.csv",
     parse_dates=["date"]
 )
 

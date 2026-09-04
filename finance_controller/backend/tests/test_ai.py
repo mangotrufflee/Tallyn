@@ -1,8 +1,11 @@
 import sys
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[1]
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 import pandas as pd
 
@@ -12,15 +15,15 @@ print("=" * 70)
 
 print("\n1. Script started")
 
-from src.reconciliation.matcher import find_top_candidates
+from backend.app.reconciliation.matcher import find_top_candidates
 print("2. Matcher imported")
 
-from src.ai.ai_reasoner import build_ai_prompt, ask_ai, validate_ai_response
+from backend.app.ai.ai_reasoner import build_ai_prompt, ask_ai, validate_ai_response
 print("3. AI reasoner imported")
 
 # Load data
-bank = pd.read_csv(project_root / "data" / "bank.csv")
-erp = pd.read_csv(project_root / "data" / "erp.csv")
+bank = pd.read_csv(project_root / "data" / "raw" / "bank.csv")
+erp = pd.read_csv(project_root / "data" / "raw" / "erp.csv")
 
 bank["date"] = pd.to_datetime(bank["date"])
 erp["date"] = pd.to_datetime(erp["date"])

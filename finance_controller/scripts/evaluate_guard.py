@@ -3,10 +3,13 @@ from pathlib import Path
 
 import pandas as pd
 
-project_root = Path(__file__).resolve().parents[2]
+project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
-from src.reconciliation.matcher import (
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+from backend.app.reconciliation.matcher import (
     find_best_match,
     classify_match,
 )
@@ -17,14 +20,14 @@ from src.reconciliation.matcher import (
 # ============================================================
 
 bank = pd.read_csv(
-    project_root / "data" / "bank.csv",
+    project_root / "data" / "raw" / "bank.csv",
     parse_dates=["date"],
 )
 erp = pd.read_csv(
-    project_root / "data" / "erp.csv",
+    project_root / "data" / "raw" / "erp.csv",
     parse_dates=["date"],
 )
-ground_truth = pd.read_csv(project_root / "data" / "verification.csv")
+ground_truth = pd.read_csv(project_root / "data" / "raw" / "verification.csv")
 ai_results = pd.read_csv(
     project_root / "data" / "results" / "ai_results.csv"
 )
