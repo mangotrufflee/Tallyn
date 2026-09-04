@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(project_root))
+
 import pandas as pd
 
 print("=" * 70)
@@ -6,15 +12,15 @@ print("=" * 70)
 
 print("\n1. Script started")
 
-from matcher import find_top_candidates
+from src.matcher import find_top_candidates
 print("2. Matcher imported")
 
-from ai_reasoner import build_ai_prompt, ask_ai, validate_ai_response
+from src.ai_reasoner import build_ai_prompt, ask_ai, validate_ai_response
 print("3. AI reasoner imported")
 
 # Load data
-bank = pd.read_csv("data/bank.csv")
-erp = pd.read_csv("data/erp.csv")
+bank = pd.read_csv(project_root / "data" / "bank.csv")
+erp = pd.read_csv(project_root / "data" / "erp.csv")
 
 bank["date"] = pd.to_datetime(bank["date"])
 erp["date"] = pd.to_datetime(erp["date"])
