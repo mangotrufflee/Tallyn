@@ -1,12 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
+} from "recharts";
 
-import { getSummary, getMetrics } from "../services/api";
 import KPICard from "../components/KPICard";
+import { getSummary, getMetrics } from "../services/api";
 
 function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [metrics, setMetrics] = useState(null);
-
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -21,8 +32,7 @@ function Dashboard() {
         setSummary(summaryData);
         setMetrics(metricsData);
       } catch (err) {
-        console.error(err);
-        setError("Unable to load dashboard data.");
+        setError(err.message);
       } finally {
         setLoading(false);
       }
@@ -31,298 +41,220 @@ function Dashboard() {
     loadDashboard();
   }, []);
 
-  /* =========================
-     LOADING
-  ========================= */
+  const chartData = useMemo(() => {
+    if (!summary) return [];
+
+    return [
+      {
+        name: "Matched",
+        value: summary.matched,
+      },
+      {
+        name: "Review",
+        value: summary.review,
+      },
+      {
+        name: "Exceptions",
+        value: summary.exceptions,
+      },
+    ];
+  }, [summary]);
+
+  const performanceData = useMemo(() => {
+    if (!metrics) return [];
+
+    return [
+      {
+        name: "Deterministic",
+        value: metrics.deterministic_accuracy,
+      },
+      {
+        name: "AI",
+        value: metrics.ai_match_rate,
+      },
+      {
+        name: "Guard",
+        value: metrics.guard_approval_accuracy,
+      },
+      {
+        name: "Final",
+        value: metrics.final_match_rate,
+      },
+    ];
+  }, [metrics]);
 
   if (loading) {
     return (
-      <div className="page-container">
-        <div className="loading-state">
-          <p>Loading dashboard...</p>
+      <div className="dashboard-page">
+        <div className="page-loading">
+          Loading dashboard...
         </div>
       </div>
     );
   }
 
-  /* =========================
-     ERROR
-  ========================= */
-
-  if (error || !summary || !metrics) {
+  if (error) {
     return (
-      <div className="page-container">
-        <div className="empty-state">
-          <h2>Unable to load dashboard</h2>
-          <p>{error}</p>
+      <div className="dashboard-page">
+        <div className="page-error">
+          {error}
         </div>
       </div>
     );
   }
-
-  /* =========================
-     VALUES
-  ========================= */
-
-  const total = summary.total_transactions || 0;
-  const matched = summary.matched || 0;
-  const review = summary.review || 0;
-  const exceptions = summary.exceptions || 0;
 
   const matchRate =
-    total > 0
-      ? ((matched / total) * 100).toFixed(1)
+    summary.total_transactions > 0
+      ? ((summary.matched / summary.total_transactions) * 100).toFixed(1)
       : "0.0";
 
-  const matchedPercentage =
-    total > 0
-      ? (matched / total) * 100
-      : 0;
-
-  const reviewPercentage =
-    total > 0
-      ? (review / total) * 100
-      : 0;
-
-  const exceptionPercentage =
-    total > 0
-      ? (exceptions / total) * 100
-      : 0;
-
   return (
-    <div className="page-container">
+    <div className="dashboard-page">
 
-      {/* =========================
-          HEADER
-      ========================= */}
+      {/* HEADER */}
 
-      <div className="page-header dashboard-page-header">
-
+      <div className="dashboard-header">
         <div>
+          <span className="dashboard-eyebrow">
+            FINANCE OPERATIONS CONTROL
+          </span>
+
           <h1>Reconciliation Overview</h1>
 
           <p>
-            Monitor the finance reconciliation pipeline and
-            verification performance
+            Monitor transaction matching, AI-assisted decisions,
+            verification controls and unresolved exceptions.
           </p>
         </div>
 
-        <div className="batch-status">
+        <div className="dashboard-status">
           <span className="status-dot"></span>
-          Batch complete
+          Live database
         </div>
-
       </div>
 
-
-      {/* =========================
-          PRIMARY KPIs
-      ========================= */}
+      {/* KPI ROW */}
 
       <div className="kpi-grid">
 
         <KPICard
-          title="Transactions Processed"
-          value={total}
-          description="Records in current batch"
-          type="neutral"
-          icon="↔"
+          title="Total Transactions"
+          value={summary.total_transactions}
+          subtitle="Records processed"
         />
 
         <KPICard
-          title="Final Matched"
-          value={matched}
-          description={`${matchRate}% automated match rate`}
-          type="success"
-          icon="✓"
+          title="Matched"
+          value={summary.matched}
+          subtitle={`${matchRate}% final match rate`}
         />
 
         <KPICard
-          title="Requires Review"
-          value={review}
-          description="Human verification queue"
-          type="warning"
-          icon="!"
+          title="Needs Review"
+          value={summary.review}
+          subtitle="Human attention required"
         />
 
         <KPICard
           title="Exceptions"
-          value={exceptions}
-          description="Could not be resolved"
-          type="danger"
-          icon="×"
+          value={summary.exceptions}
+          subtitle="Could not be resolved"
         />
 
       </div>
 
+      {/* MAIN CHART ROW */}
 
-      {/* =========================
-          HEALTH + PIPELINE
-      ========================= */}
+      <div className="dashboard-chart-grid">
 
-      <div className="dashboard-two-column">
-
-        {/* RECONCILIATION HEALTH */}
+        {/* RECONCILIATION OUTCOMES */}
 
         <div className="dashboard-card">
 
-          <div className="section-header">
-
+          <div className="card-header">
             <div>
-              <h2>Reconciliation Health</h2>
-              <p>Final operational outcome</p>
+              <h2>Reconciliation Outcomes</h2>
+              <p>
+                Distribution of final transaction decisions.
+              </p>
             </div>
-
-            <strong className="health-percentage">
-              {matchRate}%
-            </strong>
-
           </div>
 
+          <div className="chart-container pie-chart-container">
 
-          <div className="health-bar-wrapper">
+            <ResponsiveContainer width="100%" height={280}>
+              <PieChart>
 
-            <div className="health-bar">
+                <Pie
+                  data={chartData}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={65}
+                  outerRadius={100}
+                  paddingAngle={3}
+                >
+                  {chartData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} />
+                  ))}
+                </Pie>
 
-              <div
-                className="health-matched"
-                style={{
-                  width: `${matchedPercentage}%`,
-                }}
-              />
+                <Tooltip />
 
-              <div
-                className="health-review"
-                style={{
-                  width: `${reviewPercentage}%`,
-                }}
-              />
+                <Legend
+                  verticalAlign="bottom"
+                  height={36}
+                />
 
-              <div
-                className="health-exception"
-                style={{
-                  width: `${exceptionPercentage}%`,
-                }}
-              />
-
-            </div>
-
-          </div>
-
-
-          <div className="health-legend">
-
-            <div>
-              <span className="legend-dot matched-dot"></span>
-              <span>Matched</span>
-              <strong>{matched}</strong>
-            </div>
-
-            <div>
-              <span className="legend-dot review-dot"></span>
-              <span>Review</span>
-              <strong>{review}</strong>
-            </div>
-
-            <div>
-              <span className="legend-dot exception-dot"></span>
-              <span>Exception</span>
-              <strong>{exceptions}</strong>
-            </div>
+              </PieChart>
+            </ResponsiveContainer>
 
           </div>
 
         </div>
 
-
-        {/* CONTROLLER PIPELINE */}
+        {/* PERFORMANCE */}
 
         <div className="dashboard-card">
 
-          <div className="section-header">
-
+          <div className="card-header">
             <div>
-              <h2>Controller Pipeline</h2>
-
+              <h2>Measured Performance</h2>
               <p>
-                How transactions move through the system
+                Accuracy and approval metrics from evaluation data.
               </p>
             </div>
-
           </div>
 
+          <div className="chart-container">
 
-          <div className="pipeline">
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={performanceData}>
 
-            <div className="pipeline-step">
+                <XAxis
+                  dataKey="name"
+                  tickLine={false}
+                  axisLine={false}
+                />
 
-              <div className="pipeline-icon">
-                1
-              </div>
+                <YAxis
+                  domain={[0, 100]}
+                  tickLine={false}
+                  axisLine={false}
+                />
 
-              <div>
-                <strong>Ingest</strong>
-                <span>{total} records</span>
-              </div>
+                <Tooltip
+                  formatter={(value) => `${value.toFixed(2)}%`}
+                />
 
-            </div>
+                <Bar
+                  dataKey="value"
+                  radius={[6, 6, 0, 0]}
+                />
 
-
-            <div className="pipeline-arrow">
-              →
-            </div>
-
-
-            <div className="pipeline-step">
-
-              <div className="pipeline-icon">
-                2
-              </div>
-
-              <div>
-                <strong>Match</strong>
-                <span>Deterministic engine</span>
-              </div>
-
-            </div>
-
-
-            <div className="pipeline-arrow">
-              →
-            </div>
-
-
-            <div className="pipeline-step">
-
-              <div className="pipeline-icon">
-                3
-              </div>
-
-              <div>
-                <strong>Reason</strong>
-                <span>AI for uncertain cases</span>
-              </div>
-
-            </div>
-
-
-            <div className="pipeline-arrow">
-              →
-            </div>
-
-
-            <div className="pipeline-step">
-
-              <div className="pipeline-icon">
-                4
-              </div>
-
-              <div>
-                <strong>Verify</strong>
-                <span>Independent guard</span>
-              </div>
-
-            </div>
+              </BarChart>
+            </ResponsiveContainer>
 
           </div>
 
@@ -330,161 +262,185 @@ function Dashboard() {
 
       </div>
 
+      {/* CONTROL PIPELINE */}
 
-      {/* =========================
-          MEASURED PERFORMANCE
-      ========================= */}
+      <div className="dashboard-card pipeline-card">
 
-      <div className="dashboard-card performance-card">
-
-        <div className="section-header">
-
+        <div className="card-header">
           <div>
-            <h2>Measured Controller Performance</h2>
-
+            <h2>Controller Pipeline</h2>
             <p>
-              Evaluation metrics from the reconciliation batch
+              How a transaction moves from raw data to a controlled
+              financial decision.
             </p>
           </div>
+        </div>
 
-          <span className="evaluation-label">
-            EVALUATED
-          </span>
+        <div className="controller-pipeline">
+
+          <div className="pipeline-step">
+            <div className="pipeline-number">01</div>
+
+            <strong>Ingest</strong>
+
+            <span>
+              Bank and ERP records enter the controller.
+            </span>
+          </div>
+
+          <div className="pipeline-arrow">→</div>
+
+          <div className="pipeline-step">
+            <div className="pipeline-number">02</div>
+
+            <strong>Reconcile</strong>
+
+            <span>
+              Deterministic rules identify likely matches.
+            </span>
+          </div>
+
+          <div className="pipeline-arrow">→</div>
+
+          <div className="pipeline-step">
+            <div className="pipeline-number">03</div>
+
+            <strong>Reason</strong>
+
+            <span>
+              AI analyzes ambiguous transactions.
+            </span>
+          </div>
+
+          <div className="pipeline-arrow">→</div>
+
+          <div className="pipeline-step pipeline-highlight">
+            <div className="pipeline-number">04</div>
+
+            <strong>Verify</strong>
+
+            <span>
+              Independent controls validate AI decisions.
+            </span>
+          </div>
+
+          <div className="pipeline-arrow">→</div>
+
+          <div className="pipeline-step">
+            <div className="pipeline-number">05</div>
+
+            <strong>Review</strong>
+
+            <span>
+              Humans resolve remaining uncertainty.
+            </span>
+          </div>
 
         </div>
 
+      </div>
+
+      {/* MEASURED RESULTS */}
+
+      <div className="dashboard-card">
+
+        <div className="card-header">
+          <div>
+            <h2>Controller Performance</h2>
+
+            <p>
+              Evaluation results from the 500-record reconciliation
+              batch.
+            </p>
+          </div>
+        </div>
 
         <div className="performance-grid">
 
           <div className="performance-item">
-
-            <span>
-              Deterministic Accuracy
-            </span>
-
+            <span>Deterministic Accuracy</span>
             <strong>
-              {metrics.deterministic_accuracy}%
+              {metrics.deterministic_accuracy.toFixed(2)}%
             </strong>
-
             <small>
-              Correct invoice selection
+              Ground-truth invoice selection
             </small>
-
           </div>
 
-
           <div className="performance-item">
-
-            <span>
-              AI Recommendations
-            </span>
-
+            <span>AI Recommendations</span>
             <strong>
               {metrics.ai_recommendations}
             </strong>
-
             <small>
               Uncertain cases sent to AI
             </small>
-
           </div>
 
-
           <div className="performance-item">
-
-            <span>
-              Guard Approved
-            </span>
-
+            <span>Guard Approved</span>
             <strong>
               {metrics.guard_approved}
             </strong>
-
             <small>
-              AI recommendations independently verified
+              AI matches independently verified
             </small>
-
           </div>
 
-
           <div className="performance-item">
-
-            <span>
-              AI Matches Blocked
-            </span>
-
+            <span>AI Matches Blocked</span>
             <strong>
               {metrics.ai_matches_blocked}
             </strong>
-
             <small>
-              Prevented from becoming final matches
+              Recommendations rejected by guard
             </small>
-
           </div>
 
-
           <div className="performance-item">
-
-            <span>
-              Guard Approval Accuracy
-            </span>
-
+            <span>Guard Approval Accuracy</span>
             <strong>
-              {metrics.guard_approval_accuracy}%
+              {metrics.guard_approval_accuracy.toFixed(2)}%
             </strong>
-
             <small>
-              Accuracy of guard-approved AI matches
+              Correctness of approved AI matches
             </small>
-
           </div>
 
-
           <div className="performance-item">
-
-            <span>
-              Final Match Rate
-            </span>
-
+            <span>Final Match Rate</span>
             <strong>
-              {metrics.final_match_rate}%
+              {metrics.final_match_rate.toFixed(2)}%
             </strong>
-
             <small>
-              Transactions automatically resolved
+              Final verified transaction matches
             </small>
-
           </div>
 
         </div>
 
       </div>
 
+      {/* PRINCIPLE */}
 
-      {/* =========================
-          CONTROLLER PRINCIPLE
-      ========================= */}
-
-      <div className="dashboard-card controller-principle">
+      <div className="dashboard-principle">
 
         <div className="principle-icon">
           ✓
         </div>
 
         <div>
+          <span>CONTROL PRINCIPLE</span>
 
           <h3>
-            Verification-first controller
+            AI recommends. Verification decides.
           </h3>
 
           <p>
-            AI recommendations do not directly become final
-            accounting decisions. Candidate matches are independently
-            verified before being accepted; unresolved cases remain
-            visible for human review.
+            The system is designed around measured throughput,
+            independent verification and an explicit exception list
+            rather than blindly maximizing automation.
           </p>
-
         </div>
 
       </div>

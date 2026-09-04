@@ -842,19 +842,40 @@ def get_metrics():
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
+    # AI cases
+    # ========================================================
+
+    ai_cases = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM reconciliation_results
+        WHERE ai_decision IS NOT NULL
+        """
+    ).fetchone()[0]
+
+
+    # ========================================================
     # AI recommendations
-    # --------------------------------------------------------
+    # ========================================================
 
     ai_recommendations = connection.execute(
         """
         SELECT COUNT(*)
-
         FROM reconciliation_results
-
         WHERE ai_decision = 'MATCH'
         """
     ).fetchone()[0]
+
+
+    # AI match rate
+    ai_match_rate = (
+        ai_recommendations
+        / ai_cases
+        * 100
+        if ai_cases
+        else 0
+    )
 
 
     # --------------------------------------------------------
@@ -1012,15 +1033,23 @@ def get_metrics():
 
 
     return {
-
         "deterministic_accuracy":
             round(
                 deterministic_accuracy,
                 2
             ),
 
+        "ai_cases":
+            ai_cases,
+
         "ai_recommendations":
             ai_recommendations,
+
+        "ai_match_rate":
+            round(
+                ai_match_rate,
+                2
+            ),
 
         "guard_approved":
             guard_approved,
