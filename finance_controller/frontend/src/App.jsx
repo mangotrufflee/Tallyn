@@ -6,6 +6,8 @@ import Dashboard from "./pages/Dashboard";
 import Transactions from "./pages/Transactions";
 import Exceptions from "./pages/Exceptions";
 import TransactionDetails from "./pages/TransactionDetails";
+import AIInsights from "./pages/AIInsights";
+import Verification from "./pages/Verification";
 
 import "./App.css";
 
@@ -40,6 +42,13 @@ function App() {
               path="/transactions/:transactionId"
               element={<TransactionDetails />}
             />
+
+            <Route
+              path="/ai-insights"
+              element={<AIInsights />}
+            />
+
+            <Route path="/verification" element={<Verification />} />
 
           </Routes>
 

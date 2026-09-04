@@ -1,133 +1,344 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { getTransaction } from "../services/api";
+
+import {
+  Link,
+  useParams,
+} from "react-router-dom";
+
+import {
+  getTransaction,
+  reviewTransaction,
+} from "../services/api";
+
 
 function TransactionDetails() {
-  const { transactionId } = useParams();
 
-  const [transaction, setTransaction] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { transactionId } =
+    useParams();
+
+
+  const [transaction, setTransaction] =
+    useState(null);
+
+
+  const [loading, setLoading] =
+    useState(true);
+
+
+  const [error, setError] =
+    useState("");
+
+
+  const [reviewNote, setReviewNote] =
+    useState("");
+
+
+  const [reviewing, setReviewing] =
+    useState(false);
+
+
+  const [reviewMessage, setReviewMessage] =
+    useState("");
+
+
+  // ========================================================
+  // LOAD TRANSACTION
+  // ========================================================
 
   useEffect(() => {
+
     async function loadTransaction() {
+
       try {
-        const data = await getTransaction(transactionId);
+
+        const data =
+          await getTransaction(
+            transactionId
+          );
+
         setTransaction(data);
+
       } catch (err) {
-        setError("Unable to load transaction details.");
+
+        console.error(err);
+
+        setError(
+          "Unable to load transaction details."
+        );
+
       } finally {
+
         setLoading(false);
       }
     }
 
+
     loadTransaction();
+
   }, [transactionId]);
 
+
+  // ========================================================
+  // HUMAN REVIEW
+  // ========================================================
+
+  async function handleReview(
+    decision
+  ) {
+
+    setReviewing(true);
+
+    setReviewMessage("");
+
+
+    try {
+
+      await reviewTransaction(
+
+        transactionId,
+
+        decision,
+
+        reviewNote
+      );
+
+
+      setReviewMessage(
+
+        `Transaction successfully marked as ${decision}.`
+      );
+
+
+      const updated =
+        await getTransaction(
+          transactionId
+        );
+
+
+      setTransaction(updated);
+
+      setReviewNote("");
+
+
+    } catch (err) {
+
+      console.error(err);
+
+      setReviewMessage(
+
+        err.message ||
+        "Unable to submit review."
+      );
+
+    } finally {
+
+      setReviewing(false);
+    }
+  }
+
+
+  // ========================================================
+  // LOADING
+  // ========================================================
+
   if (loading) {
+
     return (
+
       <div className="page-container">
-        <p>Loading transaction...</p>
+
+        <p>
+          Loading transaction...
+        </p>
+
       </div>
     );
   }
 
+
+  // ========================================================
+  // ERROR
+  // ========================================================
+
   if (error || !transaction) {
+
     return (
+
       <div className="page-container">
-        <Link to="/transactions" className="back-link">
+
+        <Link
+          to="/transactions"
+          className="back-link"
+        >
           ← Back to Transactions
         </Link>
 
+
         <div className="empty-state">
-          <h2>Transaction not found</h2>
-          <p>{error}</p>
+
+          <h2>
+            Transaction not found
+          </h2>
+
+          <p>
+            {error}
+          </p>
+
         </div>
+
       </div>
     );
   }
+
+
+  // ========================================================
+  // STATUS
+  // ========================================================
 
   const finalStatus =
     transaction.verification_decision ||
     transaction.deterministic_status ||
     "UNKNOWN";
 
-  const statusClass = finalStatus.toLowerCase();
+
+  const statusClass =
+    finalStatus.toLowerCase();
+
+
+  const needsReview =
+    finalStatus === "REVIEW" ||
+    finalStatus === "EXCEPTION";
+
 
   return (
+
     <div className="page-container">
 
-      {/* ================= HEADER ================= */}
+
+      {/* ==================================================
+          HEADER
+      ================================================== */}
 
       <div className="details-header">
 
         <div>
-          <Link to="/transactions" className="back-link">
+
+          <Link
+            to="/transactions"
+            className="back-link"
+          >
             ← Back to Transactions
           </Link>
 
-          <h1>{transaction.transaction_id}</h1>
+
+          <h1>
+            {transaction.transaction_id}
+          </h1>
+
 
           <p>
-            Reconciliation evidence and verification trail
+            Reconciliation evidence and
+            verification trail
           </p>
+
         </div>
 
-        <span className={`status-badge status-${statusClass}`}>
+
+        <span
+          className={
+            `status-badge status-${statusClass}`
+          }
+        >
           {finalStatus}
         </span>
 
       </div>
 
 
-      {/* ================= TRANSACTION + INVOICE ================= */}
+      {/* ==================================================
+          EVIDENCE
+      ================================================== */}
 
       <div className="evidence-grid">
 
-        {/* BANK TRANSACTION */}
+
+        {/* BANK */}
 
         <div className="dashboard-card evidence-card">
 
           <div className="evidence-title">
+
             <div className="evidence-icon">
               $
             </div>
 
             <div>
-              <h2>Bank Transaction</h2>
-              <span>Source record</span>
+
+              <h2>
+                Bank Transaction
+              </h2>
+
+              <span>
+                Source record
+              </span>
+
             </div>
+
           </div>
+
 
           <div className="detail-list">
 
             <div className="detail-row">
-              <span>Transaction ID</span>
+
+              <span>
+                Transaction ID
+              </span>
+
               <strong>
                 {transaction.transaction_id}
               </strong>
+
             </div>
 
+
             <div className="detail-row">
-              <span>Date</span>
+
+              <span>
+                Date
+              </span>
+
               <strong>
                 {transaction.date}
               </strong>
+
             </div>
 
+
             <div className="detail-row">
-              <span>Counterparty</span>
+
+              <span>
+                Counterparty
+              </span>
+
               <strong>
                 {transaction.counterparty}
               </strong>
+
             </div>
 
+
             <div className="detail-row">
-              <span>Amount</span>
+
+              <span>
+                Amount
+              </span>
+
               <strong>
                 {transaction.currency}{" "}
                 {transaction.amount}
               </strong>
+
             </div>
 
           </div>
@@ -135,42 +346,78 @@ function TransactionDetails() {
         </div>
 
 
-        {/* ERP INVOICE */}
+        {/* ERP */}
 
         <div className="dashboard-card evidence-card">
 
           <div className="evidence-title">
+
             <div className="evidence-icon">
               #
             </div>
 
             <div>
-              <h2>ERP Invoice</h2>
-              <span>Matched accounting record</span>
+
+              <h2>
+                ERP Invoice
+              </h2>
+
+              <span>
+                Matched accounting record
+              </span>
+
             </div>
+
           </div>
+
 
           <div className="detail-list">
 
             <div className="detail-row">
-              <span>Invoice</span>
+
+              <span>
+                Invoice
+              </span>
+
               <strong>
-                {transaction.matched_invoice || "No match"}
+                {
+                  transaction.matched_invoice ||
+                  "No match"
+                }
               </strong>
+
             </div>
 
-            <div className="detail-row">
-              <span>Match Score</span>
-              <strong>
-                {transaction.match_score ?? "—"}
-              </strong>
-            </div>
 
             <div className="detail-row">
-              <span>Deterministic Status</span>
+
+              <span>
+                Match Score
+              </span>
+
               <strong>
-                {transaction.deterministic_status || "—"}
+                {
+                  transaction.match_score ??
+                  "—"
+                }
               </strong>
+
+            </div>
+
+
+            <div className="detail-row">
+
+              <span>
+                Deterministic Status
+              </span>
+
+              <strong>
+                {
+                  transaction.deterministic_status ||
+                  "—"
+                }
+              </strong>
+
             </div>
 
           </div>
@@ -180,18 +427,25 @@ function TransactionDetails() {
       </div>
 
 
-      {/* ================= MATCHING EVIDENCE ================= */}
+      {/* ==================================================
+          MATCHING EVIDENCE
+      ================================================== */}
 
       <div className="dashboard-card">
 
         <div className="section-header">
 
           <div>
-            <h2>Matching Evidence</h2>
+
+            <h2>
+              Matching Evidence
+            </h2>
 
             <p>
-              Signals used by the reconciliation engine
+              Signals used by the
+              reconciliation engine
             </p>
+
           </div>
 
         </div>
@@ -232,9 +486,13 @@ function TransactionDetails() {
             </span>
 
             <span className="signal-value">
-              {transaction.matched_invoice
-                ? "Matched"
-                : "Not available"}
+
+              {
+                transaction.matched_invoice
+                  ? "Matched"
+                  : "Not available"
+              }
+
             </span>
 
           </div>
@@ -247,7 +505,12 @@ function TransactionDetails() {
             </span>
 
             <span className="signal-value score-value">
-              {transaction.match_score ?? "—"}
+
+              {
+                transaction.match_score ??
+                "—"
+              }
+
             </span>
 
           </div>
@@ -257,19 +520,27 @@ function TransactionDetails() {
       </div>
 
 
-      {/* ================= AI REASONING ================= */}
+      {/* ==================================================
+          AI
+      ================================================== */}
 
       <div className="dashboard-card ai-card">
 
         <div className="section-header">
 
           <div>
-            <h2>AI Reasoning</h2>
+
+            <h2>
+              AI Reasoning
+            </h2>
 
             <p>
-              Semantic reasoning used for uncertain transactions
+              Semantic reasoning used for
+              uncertain transactions
             </p>
+
           </div>
+
 
           <span className="ai-label">
             AI
@@ -278,90 +549,139 @@ function TransactionDetails() {
         </div>
 
 
-        {transaction.ai_decision ? (
+        {
+          transaction.ai_decision ? (
 
-          <div className="ai-result">
+            <div className="ai-result">
 
-            <div className="ai-result-row">
+              <div className="ai-result-row">
 
-              <span>AI Decision</span>
+                <span>
+                  AI Decision
+                </span>
 
-              <strong>
-                {transaction.ai_decision}
-              </strong>
+                <strong>
+                  {transaction.ai_decision}
+                </strong>
+
+              </div>
+
+
+              <div className="ai-result-row">
+
+                <span>
+                  Candidate Invoice
+                </span>
+
+                <strong>
+                  {
+                    transaction.ai_invoice ||
+                    "—"
+                  }
+                </strong>
+
+              </div>
+
+
+              <div className="ai-result-row">
+
+                <span>
+                  Confidence
+                </span>
+
+                <strong>
+                  {
+                    transaction.ai_confidence ??
+                    "—"
+                  }
+                </strong>
+
+              </div>
+
+
+              <div className="ai-result-row">
+
+                <span>
+                  Risk
+                </span>
+
+                <strong>
+                  {
+                    transaction.ai_risk ||
+                    "—"
+                  }
+                </strong>
+
+              </div>
+
+
+              <div className="ai-result-row">
+
+                <span>
+                  Reason
+                </span>
+
+                <strong>
+                  {
+                    transaction.ai_reason ||
+                    "—"
+                  }
+                </strong>
+
+              </div>
 
             </div>
 
+          ) : (
 
-            <div className="ai-result-row">
+            <div className="ai-not-used">
 
-              <span>Candidate Invoice</span>
+              <span>
+                ✦
+              </span>
 
-              <strong>
-                {transaction.ai_invoice || "—"}
-              </strong>
+              <div>
 
-            </div>
+                <strong>
+                  AI reasoning was not required
+                </strong>
 
+                <p>
+                  This transaction was resolved
+                  using deterministic reconciliation
+                  and verification rules.
+                </p>
 
-            <div className="ai-result-row">
-
-              <span>Confidence</span>
-
-              <strong>
-                {transaction.ai_confidence ?? "—"}
-              </strong>
-
-            </div>
-
-
-            <div className="ai-result-row">
-
-              <span>Risk</span>
-
-              <strong>
-                {transaction.ai_risk || "—"}
-              </strong>
+              </div>
 
             </div>
-
-          </div>
-
-        ) : (
-
-          <div className="ai-not-used">
-
-            <span>✦</span>
-
-            <div>
-              <strong>AI reasoning was not required</strong>
-
-              <p>
-                This transaction was resolved using deterministic
-                reconciliation and verification rules.
-              </p>
-            </div>
-
-          </div>
-
-        )}
+          )
+        }
 
       </div>
 
 
-      {/* ================= VERIFICATION GUARD ================= */}
+      {/* ==================================================
+          VERIFICATION
+      ================================================== */}
 
       <div className="dashboard-card verification-card">
 
         <div className="section-header">
 
           <div>
-            <h2>Verification Guard</h2>
+
+            <h2>
+              Verification Guard
+            </h2>
 
             <p>
-              Independent validation of the proposed reconciliation
+              Independent validation of
+              the reconciliation decision
             </p>
+
           </div>
+
 
           <span className="verified-label">
             ✓ VERIFIED
@@ -379,7 +699,9 @@ function TransactionDetails() {
             </span>
 
             <span
-              className={`status-badge status-${statusClass}`}
+              className={
+                `status-badge status-${statusClass}`
+              }
             >
               {finalStatus}
             </span>
@@ -394,8 +716,10 @@ function TransactionDetails() {
             </span>
 
             <strong>
-              {transaction.verification_reason ||
-                "Transaction passed verification checks."}
+              {
+                transaction.verification_reason ||
+                "Transaction passed verification checks."
+              }
             </strong>
 
           </div>
@@ -405,18 +729,245 @@ function TransactionDetails() {
       </div>
 
 
-      {/* ================= AUDIT TRAIL ================= */}
+      {/* ==================================================
+          HUMAN REVIEW
+      ================================================== */}
+
+      {needsReview && (
+
+        <div className="dashboard-card review-panel">
+
+          <div className="section-header">
+
+            <div>
+
+              <h2>
+                Human Review
+              </h2>
+
+              <p>
+                Automated reconciliation could
+                not safely resolve this transaction.
+              </p>
+
+            </div>
+
+
+            <span className="review-required-label">
+              REVIEW REQUIRED
+            </span>
+
+          </div>
+
+
+          <div className="review-warning">
+
+            <strong>
+              Automated decision requires
+              human verification
+            </strong>
+
+            <p>
+              Review the evidence above before
+              making a final accounting decision.
+            </p>
+
+          </div>
+
+
+          <label className="review-note-label">
+
+            Reviewer Note
+
+          </label>
+
+
+          <textarea
+
+            className="review-note"
+
+            placeholder={
+              "Add a note explaining your decision..."
+            }
+
+            value={reviewNote}
+
+            onChange={(event) =>
+              setReviewNote(
+                event.target.value
+              )
+            }
+
+          />
+
+
+          <div className="review-actions">
+
+            <button
+
+              className="review-button approve"
+
+              onClick={() =>
+                handleReview("APPROVE")
+              }
+
+              disabled={reviewing}
+
+            >
+              ✓ Approve Match
+            </button>
+
+
+            <button
+
+              className="review-button reject"
+
+              onClick={() =>
+                handleReview("REJECT")
+              }
+
+              disabled={reviewing}
+
+            >
+              × Reject
+            </button>
+
+
+            <button
+
+              className="review-button unresolved"
+
+              onClick={() =>
+                handleReview("UNRESOLVED")
+              }
+
+              disabled={reviewing}
+
+            >
+              Keep Unresolved
+            </button>
+
+          </div>
+
+
+          {reviewMessage && (
+
+            <div className="review-message">
+
+              {reviewMessage}
+
+            </div>
+
+          )}
+
+        </div>
+
+      )}
+
+
+      {/* ==================================================
+          PREVIOUS REVIEW
+      ================================================== */}
+
+      {
+        transaction.review_status ===
+        "COMPLETED" && (
+
+          <div className="dashboard-card">
+
+            <div className="section-header">
+
+              <div>
+
+                <h2>
+                  Human Review Completed
+                </h2>
+
+                <p>
+                  This transaction has already
+                  received a reviewer decision.
+                </p>
+
+              </div>
+
+            </div>
+
+
+            <div className="detail-list">
+
+              <div className="detail-row">
+
+                <span>
+                  Reviewer Decision
+                </span>
+
+                <strong>
+                  {
+                    transaction.review_decision ||
+                    "—"
+                  }
+                </strong>
+
+              </div>
+
+
+              <div className="detail-row">
+
+                <span>
+                  Reviewer Note
+                </span>
+
+                <strong>
+                  {
+                    transaction.reviewer_note ||
+                    "No note provided"
+                  }
+                </strong>
+
+              </div>
+
+
+              <div className="detail-row">
+
+                <span>
+                  Reviewed At
+                </span>
+
+                <strong>
+                  {
+                    transaction.reviewed_at ||
+                    "—"
+                  }
+                </strong>
+
+              </div>
+
+            </div>
+
+          </div>
+        )
+      }
+
+
+      {/* ==================================================
+          AUDIT TRAIL
+      ================================================== */}
 
       <div className="dashboard-card audit-card">
 
         <div className="section-header">
 
           <div>
-            <h2>Decision Trail</h2>
+
+            <h2>
+              Decision Trail
+            </h2>
 
             <p>
-              How this transaction moved through the controller
+              How this transaction moved through
+              the controller
             </p>
+
           </div>
 
         </div>
@@ -424,61 +975,76 @@ function TransactionDetails() {
 
         <div className="timeline">
 
+
           <div className="timeline-item completed">
+
             <div className="timeline-dot">
               ✓
             </div>
 
             <div>
+
               <strong>
                 Transaction ingested
               </strong>
 
               <p>
-                Bank transaction entered the reconciliation batch.
+                Bank transaction entered the
+                reconciliation batch.
               </p>
+
             </div>
+
           </div>
 
 
           <div className="timeline-item completed">
+
             <div className="timeline-dot">
               ✓
             </div>
 
             <div>
+
               <strong>
                 Deterministic matching completed
               </strong>
 
               <p>
-                Candidate invoice selected using reconciliation
-                signals.
+                Candidate invoice selected using
+                reconciliation signals.
               </p>
+
             </div>
+
           </div>
 
 
-          {transaction.ai_decision && (
-            <div className="timeline-item completed">
+          {
+            transaction.ai_decision && (
 
-              <div className="timeline-dot">
-                ✦
+              <div className="timeline-item completed">
+
+                <div className="timeline-dot">
+                  ✦
+                </div>
+
+                <div>
+
+                  <strong>
+                    AI reasoning completed
+                  </strong>
+
+                  <p>
+                    Semantic reasoning was used
+                    for additional analysis.
+                  </p>
+
+                </div>
+
               </div>
-
-              <div>
-                <strong>
-                  AI reasoning completed
-                </strong>
-
-                <p>
-                  Semantic reasoning was used because the transaction
-                  required additional analysis.
-                </p>
-              </div>
-
-            </div>
-          )}
+            )
+          }
 
 
           <div className="timeline-item completed">
@@ -488,16 +1054,48 @@ function TransactionDetails() {
             </div>
 
             <div>
+
               <strong>
                 Verification guard completed
               </strong>
 
               <p>
-                Final decision was independently verified.
+                Final automated decision was
+                independently verified.
               </p>
+
             </div>
 
           </div>
+
+
+          {
+            transaction.review_status ===
+            "COMPLETED" && (
+
+              <div className="timeline-item completed">
+
+                <div className="timeline-dot">
+                  ✓
+                </div>
+
+                <div>
+
+                  <strong>
+                    Human review completed
+                  </strong>
+
+                  <p>
+                    Reviewer decision:
+                    {" "}
+                    {transaction.review_decision}
+                  </p>
+
+                </div>
+
+              </div>
+            )
+          }
 
 
           <div className="timeline-item final">
@@ -507,14 +1105,16 @@ function TransactionDetails() {
             </div>
 
             <div>
+
               <strong>
                 Final status: {finalStatus}
               </strong>
 
               <p>
-                This is the current operational state of the
-                transaction.
+                This is the current operational
+                state of the transaction.
               </p>
+
             </div>
 
           </div>
@@ -526,5 +1126,6 @@ function TransactionDetails() {
     </div>
   );
 }
+
 
 export default TransactionDetails;
