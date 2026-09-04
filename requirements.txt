@@ -1,0 +1,6 @@
+pandas
+rapidfuzz
+numpy
+openai
+fastapi
+uvicorn

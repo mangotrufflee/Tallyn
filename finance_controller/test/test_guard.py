@@ -5,8 +5,8 @@ project_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(project_root))
 
 import pandas as pd
-from src.verification_guard import verify_ai_match
-from src.verification_guard import (
+from src.reconciliation.verification_guard import verify_ai_match
+from src.reconciliation.verification_guard import (
     verify_ai_match,
     get_final_decision
 )

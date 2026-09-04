@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pandas as pd
 
-project_root = Path(__file__).resolve().parents[1]
+project_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(project_root))
 
-from src.matcher import (
+from src.reconciliation.matcher import (
     find_best_match,
     classify_match,
 )
@@ -25,7 +25,9 @@ erp = pd.read_csv(
     parse_dates=["date"],
 )
 ground_truth = pd.read_csv(project_root / "data" / "verification.csv")
-ai_results = pd.read_csv(project_root / "data" / "ai_results.csv")
+ai_results = pd.read_csv(
+    project_root / "data" / "results" / "ai_results.csv"
+)
 
 
 print("=" * 70)
@@ -504,5 +506,5 @@ print(
 )
 
 print(
-    "data/guard_evaluation.csv"
+    "data/results/guard_evaluation.csv"
 )

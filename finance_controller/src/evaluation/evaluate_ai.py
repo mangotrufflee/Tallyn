@@ -1,6 +1,12 @@
+import sys
+from pathlib import Path
+
 import pandas as pd
 
-from matcher import find_best_match, classify_match
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
+
+from src.reconciliation.matcher import find_best_match, classify_match
 
 
 def run_deterministic_reconciliation(bank, erp):
@@ -75,9 +81,9 @@ def main():
     print()
     print("Loading data...")
 
-    bank = pd.read_csv("data/bank.csv")
-    erp = pd.read_csv("data/erp.csv")
-    ground_truth = pd.read_csv("data/verification.csv")
+    bank = pd.read_csv(project_root / "data" / "bank.csv")
+    erp = pd.read_csv(project_root / "data" / "erp.csv")
+    ground_truth = pd.read_csv(project_root / "data" / "verification.csv")
 
     bank["date"] = pd.to_datetime(bank["date"])
     erp["date"] = pd.to_datetime(erp["date"])
@@ -118,7 +124,7 @@ def main():
 
     try:
         ai_results = pd.read_csv(
-            "data/ai_results.csv"
+            project_root / "data" / "results" / "ai_results.csv"
         )
 
         comparison = comparison.merge(
@@ -274,14 +280,14 @@ def main():
     # --------------------------------------------------
 
     comparison.to_csv(
-        "data/ai_evaluation.csv",
+        project_root / "data" / "results" / "ai_evaluation.csv",
         index=False
     )
 
     print()
     print(
         "Detailed evaluation saved to "
-        "data/ai_evaluation.csv"
+        "data/results/ai_evaluation.csv"
     )
 
     print()

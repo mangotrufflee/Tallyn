@@ -1,20 +1,26 @@
+import sys
+from pathlib import Path
+
 import pandas as pd
 
-from matcher import find_top_candidates
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
+
+from src.reconciliation.matcher import find_top_candidates
 
 
 bank = pd.read_csv(
-    "data/bank.csv",
+    project_root / "data" / "bank.csv",
     parse_dates=["date"]
 )
 
 erp = pd.read_csv(
-    "data/erp.csv",
+    project_root / "data" / "erp.csv",
     parse_dates=["date"]
 )
 
 verification = pd.read_csv(
-    "data/verification.csv"
+    project_root / "data" / "verification.csv"
 )
 
 

@@ -12,10 +12,10 @@ print("=" * 70)
 
 print("\n1. Script started")
 
-from src.matcher import find_top_candidates
+from src.reconciliation.matcher import find_top_candidates
 print("2. Matcher imported")
 
-from src.ai_reasoner import build_ai_prompt, ask_ai, validate_ai_response
+from src.ai.ai_reasoner import build_ai_prompt, ask_ai, validate_ai_response
 print("3. AI reasoner imported")
 
 # Load data

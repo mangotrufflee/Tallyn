@@ -1,3 +1,9 @@
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(project_root))
+
 import random
 from datetime import datetime, timedelta
 
@@ -357,17 +363,17 @@ def generate_data():
     # ========================================================
 
     bank_df.to_csv(
-        "data/bank.csv",
+        project_root / "data" / "bank.csv",
         index=False
     )
 
     erp_df.to_csv(
-        "data/erp.csv",
+        project_root / "data" / "erp.csv",
         index=False
     )
 
     ground_truth_df.to_csv(
-        "data/verification.csv",
+        project_root / "data" / "verification.csv",
         index=False
     )
 
