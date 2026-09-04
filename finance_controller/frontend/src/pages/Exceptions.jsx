@@ -12,7 +12,7 @@ function Exceptions() {
       try {
         const data = await getExceptions();
         setExceptions(data);
-      } catch (err) {
+      } catch {
         setError("Unable to load exceptions.");
       } finally {
         setLoading(false);
@@ -122,6 +122,9 @@ function Exceptions() {
                   <th>Counterparty</th>
                   <th>Amount</th>
                   <th>Invoice</th>
+                  <th>AI Decision</th>
+                  <th>Verification</th>
+                  <th>Review</th>
                   <th>Score</th>
                   <th>Decision</th>
                   <th>Reason</th>
@@ -139,6 +142,20 @@ function Exceptions() {
 
                   return (
                     <tr key={transaction.transaction_id}>
+
+                      <td>
+                        {transaction.ai_decision || "—"}
+                      </td>
+
+                      <td>
+                        {transaction.verification_decision || "—"}
+                      </td>
+
+                      <td>
+                        {transaction.review_status === "COMPLETED"
+                          ? transaction.review_decision
+                          : "Open"}
+                      </td>
 
                       <td>
                         <strong>

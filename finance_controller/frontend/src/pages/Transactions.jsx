@@ -199,8 +199,13 @@ function Transactions() {
                   <th>Date</th>
                   <th>Counterparty</th>
                   <th>Amount</th>
+                  <th>Currency</th>
+                  <th>Matched Invoice</th>
                   <th>Score</th>
-                  <th>Final Status</th>
+                  <th>Deterministic</th>
+                  <th>AI Decision</th>
+                  <th>Verification</th>
+                  <th>Review</th>
                   <th></th>
                 </tr>
               </thead>
@@ -221,6 +226,14 @@ function Transactions() {
                       >
 
                         <td>
+                          {transaction.currency || "—"}
+                        </td>
+
+                        <td>
+                          {transaction.matched_invoice || "—"}
+                        </td>
+
+                        <td>
                           <strong>
                             {
                               transaction.transaction_id
@@ -233,6 +246,30 @@ function Transactions() {
                               "No invoice"
                             }
                           </span>
+                        </td>
+
+                        <td>
+                          <span className={`status-badge ${getStatusClass(
+                            transaction.deterministic_status
+                          )}`}>
+                            {transaction.deterministic_status || "—"}
+                          </span>
+                        </td>
+
+                        <td>{transaction.ai_decision || "—"}</td>
+
+                        <td>
+                          <span className={`status-badge ${getStatusClass(
+                            transaction.verification_decision
+                          )}`}>
+                            {transaction.verification_decision || "—"}
+                          </span>
+                        </td>
+
+                        <td>
+                          {transaction.review_status === "COMPLETED"
+                            ? transaction.review_decision
+                            : "Open"}
                         </td>
 
                         <td>

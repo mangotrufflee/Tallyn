@@ -206,8 +206,8 @@ function TransactionDetails() {
 
 
   const needsReview =
-    finalStatus === "REVIEW" ||
-    finalStatus === "EXCEPTION";
+    transaction.review_status !== "COMPLETED" &&
+    (finalStatus === "REVIEW" || finalStatus === "EXCEPTION");
 
 
   return (

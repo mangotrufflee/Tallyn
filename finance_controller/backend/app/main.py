@@ -547,8 +547,7 @@ def run_reconciliation():
 
         connection.execute(
             """
-            INSERT OR REPLACE INTO
-            reconciliation_results (
+            INSERT INTO reconciliation_results (
 
                 transaction_id,
                 matched_invoice,
@@ -581,6 +580,24 @@ def run_reconciliation():
                 NULL, NULL, NULL, NULL,
                 CURRENT_TIMESTAMP
             )
+            ON CONFLICT(transaction_id) DO UPDATE SET
+                matched_invoice = excluded.matched_invoice,
+                match_score = excluded.match_score,
+                deterministic_status = excluded.deterministic_status,
+                reason = excluded.reason,
+                ai_decision = excluded.ai_decision,
+                ai_invoice = excluded.ai_invoice,
+                ai_confidence = excluded.ai_confidence,
+                ai_reason = excluded.ai_reason,
+                ai_risk = excluded.ai_risk,
+                verification_decision = CASE
+                    WHEN reconciliation_results.review_status = 'COMPLETED'
+                    THEN reconciliation_results.verification_decision
+                    ELSE excluded.verification_decision
+                END,
+                verification_reason = excluded.verification_reason,
+                verification_checks = excluded.verification_checks,
+                updated_at = CURRENT_TIMESTAMP
             """,
 
             (
@@ -877,6 +894,36 @@ def get_metrics():
         else 0
     )
 
+    ai_review_recommendations = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM reconciliation_results
+        WHERE ai_decision = 'REVIEW'
+        """
+    ).fetchone()[0]
+
+    ai_evaluation_rows = connection.execute(
+        """
+        SELECT r.ai_invoice, g.expected_invoice
+        FROM reconciliation_results r
+        JOIN ground_truth g ON r.transaction_id = g.transaction_id
+        WHERE r.ai_decision = 'MATCH'
+        """
+    ).fetchall()
+
+    ai_correct = sum(
+        1
+        for row in ai_evaluation_rows
+        if row["ai_invoice"]
+        and str(row["ai_invoice"]).strip().upper().replace("_DUP", "")
+        == str(row["expected_invoice"]).strip().upper().replace("_DUP", "")
+    )
+    ai_recommendation_accuracy = (
+        ai_correct / len(ai_evaluation_rows) * 100
+        if ai_evaluation_rows
+        else 0
+    )
+
 
     # --------------------------------------------------------
     # Guard approved
@@ -1050,6 +1097,13 @@ def get_metrics():
                 ai_match_rate,
                 2
             ),
+
+        "ai_review_recommendations": ai_review_recommendations,
+
+        "ai_recommendation_accuracy": round(
+            ai_recommendation_accuracy,
+            2,
+        ),
 
         "guard_approved":
             guard_approved,
@@ -1335,6 +1389,7 @@ def get_exceptions():
 
         WHERE verification_decision
         IN ('REVIEW', 'EXCEPTION')
+        AND COALESCE(review_status, '') != 'COMPLETED'
 
         ORDER BY transaction_id
         """

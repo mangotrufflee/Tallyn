@@ -349,8 +349,7 @@ function Dashboard() {
             <h2>Controller Performance</h2>
 
             <p>
-              Evaluation results from the 500-record reconciliation
-              batch.
+              Evaluation results from the current reconciliation batch.
             </p>
           </div>
         </div>
@@ -368,13 +367,25 @@ function Dashboard() {
           </div>
 
           <div className="performance-item">
+            <span>AI Cases</span>
+            <strong>{metrics.ai_cases}</strong>
+            <small>Uncertain cases sent to AI</small>
+          </div>
+
+          <div className="performance-item">
             <span>AI Recommendations</span>
             <strong>
               {metrics.ai_recommendations}
             </strong>
             <small>
-              Uncertain cases sent to AI
+              AI MATCH recommendations
             </small>
+          </div>
+
+          <div className="performance-item">
+            <span>AI Match Rate</span>
+            <strong>{metrics.ai_match_rate.toFixed(2)}%</strong>
+            <small>AI MATCH recommendations among AI cases</small>
           </div>
 
           <div className="performance-item">

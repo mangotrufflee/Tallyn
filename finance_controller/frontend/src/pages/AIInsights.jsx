@@ -6,6 +6,7 @@ import {
 
 import {
   getAIInsights,
+  getMetrics,
 } from "../services/api";
 
 
@@ -13,6 +14,9 @@ function AIInsights() {
 
   const [transactions, setTransactions] =
     useState([]);
+
+  const [metrics, setMetrics] =
+    useState(null);
 
   const [loading, setLoading] =
     useState(true);
@@ -31,10 +35,13 @@ function AIInsights() {
 
       try {
 
-        const data =
-          await getAIInsights();
+        const [data, metricsData] = await Promise.all([
+          getAIInsights(),
+          getMetrics(),
+        ]);
 
         setTransactions(data);
+        setMetrics(metricsData);
 
       } catch (err) {
 
@@ -279,6 +286,24 @@ function AIInsights() {
 
           <div className="kpi-footer neutral-text">
             Uncertain transactions sent to AI
+          </div>
+
+        </div>
+
+        <div className="kpi-card">
+
+          <div className="kpi-top">
+            <span className="kpi-title">
+              Recommendation Accuracy
+            </span>
+          </div>
+
+          <div className="kpi-value">
+            {metrics?.ai_recommendation_accuracy ?? "—"}%
+          </div>
+
+          <div className="kpi-footer neutral-text">
+            Accuracy among AI MATCH recommendations
           </div>
 
         </div>
