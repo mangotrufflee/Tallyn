@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
 
-import "../App.css";
-import Sidebar from "../components/Sidebar";
 import Topbar from "../components/Topbar";
 import KPICard from "../components/KPICard";
 
@@ -17,6 +15,7 @@ function Dashboard() {
         setSummary(data);
       })
       .catch((err) => {
+        console.error(err);
         setError(err.message);
       });
   }, []);
@@ -43,52 +42,194 @@ function Dashboard() {
     (summary.matched / summary.total_transactions) * 100;
 
   return (
-    <div className="app">
+    <>
+      <Topbar />
 
-      <Sidebar />
+      <section className="kpi-grid">
 
-      <main className="main-content">
+        <KPICard
+          title="Total Transactions"
+          value={summary.total_transactions}
+          description="Records processed"
+          icon="#"
+        />
 
-        <Topbar />
+        <KPICard
+          title="Matched"
+          value={summary.matched}
+          description={`${matchRate.toFixed(1)}% match rate`}
+          type="success"
+          icon="✓"
+        />
 
-        <section className="kpi-grid">
+        <KPICard
+          title="Needs Review"
+          value={summary.review}
+          description="Requires human verification"
+          type="warning"
+          icon="!"
+        />
 
-          <KPICard
-            title="Total Transactions"
-            value={summary.total_transactions}
-            description="Records processed"
-            icon="#"
+        <KPICard
+          title="Exceptions"
+          value={summary.exceptions}
+          description="Unable to resolve"
+          type="danger"
+          icon="×"
+        />
+
+      </section>
+
+
+      <section className="dashboard-card">
+
+        <div className="section-header">
+
+          <div>
+            <h2>Reconciliation Health</h2>
+
+            <p>
+              Percentage of transactions successfully matched
+            </p>
+          </div>
+
+          <strong className="health-percentage">
+            {matchRate.toFixed(1)}%
+          </strong>
+
+        </div>
+
+
+        <div className="progress-container">
+
+          <div
+            className="progress-bar"
+            style={{
+              width: `${matchRate}%`,
+            }}
           />
 
-          <KPICard
-            title="Matched"
-            value={summary.matched}
-            description={`${matchRate.toFixed(1)}% match rate`}
-            type="success"
-            icon="✓"
-          />
+        </div>
 
-          <KPICard
-            title="Needs Review"
-            value={summary.review}
-            description="Requires human verification"
-            type="warning"
-            icon="!"
-          />
 
-          <KPICard
-            title="Exceptions"
-            value={summary.exceptions}
-            description="Unable to resolve"
-            type="danger"
-            icon="×"
-          />
+        <div className="progress-labels">
 
-        </section>
+          <span>
+            {summary.matched} matched
+          </span>
 
-      </main>
+          <span>
+            {summary.review + summary.exceptions} require attention
+          </span>
 
-    </div>
+        </div>
+
+      </section>
+
+
+      <section className="dashboard-card">
+
+        <div className="section-header">
+
+          <div>
+            <h2>Reconciliation Pipeline</h2>
+
+            <p>
+              How transactions move through the finance controller
+            </p>
+          </div>
+
+        </div>
+
+
+        <div className="pipeline">
+
+          <div className="pipeline-step">
+
+            <div className="pipeline-icon">
+              01
+            </div>
+
+            <div>
+              <strong>Bank Data</strong>
+              <span>Source transactions</span>
+            </div>
+
+          </div>
+
+
+          <div className="pipeline-arrow">→</div>
+
+
+          <div className="pipeline-step">
+
+            <div className="pipeline-icon">
+              02
+            </div>
+
+            <div>
+              <strong>Matching</strong>
+              <span>Deterministic rules</span>
+            </div>
+
+          </div>
+
+
+          <div className="pipeline-arrow">→</div>
+
+
+          <div className="pipeline-step ai-step">
+
+            <div className="pipeline-icon">
+              ✦
+            </div>
+
+            <div>
+              <strong>AI Reasoning</strong>
+              <span>Qwen analysis</span>
+            </div>
+
+          </div>
+
+
+          <div className="pipeline-arrow">→</div>
+
+
+          <div className="pipeline-step">
+
+            <div className="pipeline-icon">
+              04
+            </div>
+
+            <div>
+              <strong>Verification</strong>
+              <span>Independent guard</span>
+            </div>
+
+          </div>
+
+
+          <div className="pipeline-arrow">→</div>
+
+
+          <div className="pipeline-step">
+
+            <div className="pipeline-icon">
+              ✓
+            </div>
+
+            <div>
+              <strong>Final Decision</strong>
+              <span>Match or review</span>
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+    </>
   );
 }
 
