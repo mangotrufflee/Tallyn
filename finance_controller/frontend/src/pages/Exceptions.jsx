@@ -35,6 +35,7 @@ function Exceptions() {
     return (
       <div className="page-container">
         <h1>Exceptions</h1>
+
         <div className="empty-state">
           <h2>Something went wrong</h2>
           <p>{error}</p>
@@ -62,7 +63,6 @@ function Exceptions() {
 
       {/* Summary */}
       <div className="exception-summary">
-
         <div className="summary-box">
           <span>Total Exceptions</span>
           <strong>{exceptions.length}</strong>
@@ -91,12 +91,10 @@ function Exceptions() {
             }
           </strong>
         </div>
-
       </div>
 
       {/* Exception Table */}
       <div className="dashboard-card exception-card">
-
         <div className="section-header">
           <div>
             <h2>Review Queue</h2>
@@ -110,7 +108,9 @@ function Exceptions() {
         {exceptions.length === 0 ? (
           <div className="empty-state">
             <h2>No exceptions</h2>
-            <p>All transactions have been successfully resolved.</p>
+            <p>
+              All transactions have been successfully resolved.
+            </p>
           </div>
         ) : (
           <div className="table-wrapper">
@@ -134,7 +134,6 @@ function Exceptions() {
 
               <tbody>
                 {exceptions.map((transaction) => {
-
                   const status =
                     transaction.verification_decision ||
                     transaction.deterministic_status ||
@@ -143,43 +142,41 @@ function Exceptions() {
                   return (
                     <tr key={transaction.transaction_id}>
 
-                      <td>
-                        {transaction.ai_decision || "—"}
-                      </td>
-
-                      <td>
-                        {transaction.verification_decision || "—"}
-                      </td>
-
-                      <td>
-                        {transaction.review_status === "COMPLETED"
-                          ? transaction.review_decision
-                          : "Open"}
-                      </td>
-
+                      {/* Transaction */}
                       <td>
                         <strong>
                           {transaction.transaction_id}
                         </strong>
                       </td>
 
+                      {/* Counterparty */}
                       <td>
-                        {transaction.counterparty}
+                        {transaction.counterparty || "—"}
                       </td>
 
+                      {/* Amount */}
                       <td>
-                        {transaction.currency}{" "}
-                        {transaction.amount}
+                        <strong>
+                          {transaction.currency === "INR"
+                            ? "₹"
+                            : transaction.currency || ""}
+                          {Number(transaction.amount || 0).toLocaleString(
+                            "en-IN"
+                          )}
+                        </strong>
                       </td>
 
+                      {/* Invoice */}
                       <td>
                         {transaction.matched_invoice || "—"}
                       </td>
 
+                      {/* AI Decision */}
                       <td>
-                        {transaction.match_score ?? "—"}
+                        {transaction.ai_decision || "—"}
                       </td>
 
+                      {/* Verification */}
                       <td>
                         <span
                           className={`status-badge status-${status.toLowerCase()}`}
@@ -188,11 +185,32 @@ function Exceptions() {
                         </span>
                       </td>
 
+                      {/* Review */}
+                      <td>
+                        {transaction.review_status === "COMPLETED"
+                          ? transaction.review_decision
+                          : "Open"}
+                      </td>
+
+                      {/* Score */}
+                      <td>
+                        {transaction.match_score ?? "—"}
+                      </td>
+
+                      {/* Decision */}
+                      <td>
+                        {transaction.review_status === "COMPLETED"
+                          ? transaction.review_decision
+                          : "Pending"}
+                      </td>
+
+                      {/* Reason */}
                       <td className="reason-cell">
                         {transaction.verification_reason ||
                           "Requires manual verification"}
                       </td>
 
+                      {/* Action */}
                       <td>
                         <Link
                           to={`/transactions/${transaction.transaction_id}`}
@@ -210,9 +228,7 @@ function Exceptions() {
             </table>
           </div>
         )}
-
       </div>
-
     </div>
   );
 }

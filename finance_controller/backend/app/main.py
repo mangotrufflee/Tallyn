@@ -1062,6 +1062,38 @@ def get_metrics():
         """
     ).fetchone()[0]
 
+    human_reviewed = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM reconciliation_results
+        WHERE review_status = 'COMPLETED'
+        """
+    ).fetchone()[0]
+
+    human_approved = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM reconciliation_results
+        WHERE review_decision = 'APPROVE'
+        """
+    ).fetchone()[0]
+
+    human_rejected = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM reconciliation_results
+        WHERE review_decision = 'REJECT'
+        """
+    ).fetchone()[0]
+
+    human_unresolved = connection.execute(
+        """
+        SELECT COUNT(*)
+        FROM reconciliation_results
+        WHERE review_decision = 'UNRESOLVED'
+        """
+    ).fetchone()[0]
+
 
     final_match_rate = (
 
@@ -1122,6 +1154,11 @@ def get_metrics():
                 final_match_rate,
                 2
             ),
+
+        "human_reviewed": human_reviewed,
+        "human_approved": human_approved,
+        "human_rejected": human_rejected,
+        "human_unresolved": human_unresolved,
     }
 
 # ============================================================

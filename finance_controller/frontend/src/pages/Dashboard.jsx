@@ -77,7 +77,7 @@ function Dashboard() {
         value: metrics.guard_approval_accuracy,
       },
       {
-        name: "Final",
+        name: "Automated",
         value: metrics.final_match_rate,
       },
     ];
@@ -105,7 +105,10 @@ function Dashboard() {
 
   const matchRate =
     summary.total_transactions > 0
-      ? ((summary.matched / summary.total_transactions) * 100).toFixed(1)
+      ? (
+          (summary.matched / summary.total_transactions) *
+          100
+        ).toFixed(1)
       : "0.0";
 
   return (
@@ -133,6 +136,7 @@ function Dashboard() {
         </div>
       </div>
 
+
       {/* KPI ROW */}
 
       <div className="kpi-grid">
@@ -146,7 +150,7 @@ function Dashboard() {
         <KPICard
           title="Matched"
           value={summary.matched}
-          subtitle={`${matchRate}% final match rate`}
+          subtitle={`${matchRate}% automated match rate`}
         />
 
         <KPICard
@@ -163,6 +167,7 @@ function Dashboard() {
 
       </div>
 
+
       {/* MAIN CHART ROW */}
 
       <div className="dashboard-chart-grid">
@@ -174,6 +179,7 @@ function Dashboard() {
           <div className="card-header">
             <div>
               <h2>Reconciliation Outcomes</h2>
+
               <p>
                 Distribution of final transaction decisions.
               </p>
@@ -183,6 +189,7 @@ function Dashboard() {
           <div className="chart-container pie-chart-container">
 
             <ResponsiveContainer width="100%" height={280}>
+
               <PieChart>
 
                 <Pie
@@ -208,28 +215,36 @@ function Dashboard() {
                 />
 
               </PieChart>
+
             </ResponsiveContainer>
 
           </div>
 
         </div>
 
+
         {/* PERFORMANCE */}
 
         <div className="dashboard-card">
 
           <div className="card-header">
+
             <div>
+
               <h2>Measured Performance</h2>
+
               <p>
                 Accuracy and approval metrics from evaluation data.
               </p>
+
             </div>
+
           </div>
 
           <div className="chart-container">
 
             <ResponsiveContainer width="100%" height={280}>
+
               <BarChart data={performanceData}>
 
                 <XAxis
@@ -245,7 +260,9 @@ function Dashboard() {
                 />
 
                 <Tooltip
-                  formatter={(value) => `${value.toFixed(2)}%`}
+                  formatter={(value) =>
+                    `${value.toFixed(2)}%`
+                  }
                 />
 
                 <Bar
@@ -254,6 +271,7 @@ function Dashboard() {
                 />
 
               </BarChart>
+
             </ResponsiveContainer>
 
           </div>
@@ -262,175 +280,370 @@ function Dashboard() {
 
       </div>
 
+
       {/* CONTROL PIPELINE */}
 
       <div className="dashboard-card pipeline-card">
 
         <div className="card-header">
+
           <div>
+
             <h2>Controller Pipeline</h2>
+
             <p>
               How a transaction moves from raw data to a controlled
               financial decision.
             </p>
+
           </div>
+
         </div>
 
         <div className="controller-pipeline">
 
           <div className="pipeline-step">
-            <div className="pipeline-number">01</div>
+
+            <div className="pipeline-number">
+              01
+            </div>
 
             <strong>Ingest</strong>
 
             <span>
               Bank and ERP records enter the controller.
             </span>
+
           </div>
 
-          <div className="pipeline-arrow">→</div>
+          <div className="pipeline-arrow">
+            →
+          </div>
 
           <div className="pipeline-step">
-            <div className="pipeline-number">02</div>
+
+            <div className="pipeline-number">
+              02
+            </div>
 
             <strong>Reconcile</strong>
 
             <span>
               Deterministic rules identify likely matches.
             </span>
+
           </div>
 
-          <div className="pipeline-arrow">→</div>
+          <div className="pipeline-arrow">
+            →
+          </div>
 
           <div className="pipeline-step">
-            <div className="pipeline-number">03</div>
+
+            <div className="pipeline-number">
+              03
+            </div>
 
             <strong>Reason</strong>
 
             <span>
               AI analyzes ambiguous transactions.
             </span>
+
           </div>
 
-          <div className="pipeline-arrow">→</div>
+          <div className="pipeline-arrow">
+            →
+          </div>
 
           <div className="pipeline-step pipeline-highlight">
-            <div className="pipeline-number">04</div>
+
+            <div className="pipeline-number">
+              04
+            </div>
 
             <strong>Verify</strong>
 
             <span>
               Independent controls validate AI decisions.
             </span>
+
           </div>
 
-          <div className="pipeline-arrow">→</div>
+          <div className="pipeline-arrow">
+            →
+          </div>
 
           <div className="pipeline-step">
-            <div className="pipeline-number">05</div>
+
+            <div className="pipeline-number">
+              05
+            </div>
 
             <strong>Review</strong>
 
             <span>
               Humans resolve remaining uncertainty.
             </span>
+
           </div>
 
         </div>
 
       </div>
+
 
       {/* MEASURED RESULTS */}
 
       <div className="dashboard-card">
 
         <div className="card-header">
+
           <div>
+
             <h2>Controller Performance</h2>
 
             <p>
               Evaluation results from the current reconciliation batch.
             </p>
+
           </div>
+
         </div>
 
         <div className="performance-grid">
 
           <div className="performance-item">
-            <span>Deterministic Accuracy</span>
+
+            <span>
+              Deterministic Accuracy
+            </span>
+
             <strong>
               {metrics.deterministic_accuracy.toFixed(2)}%
             </strong>
+
             <small>
               Ground-truth invoice selection
             </small>
+
           </div>
 
-          <div className="performance-item">
-            <span>AI Cases</span>
-            <strong>{metrics.ai_cases}</strong>
-            <small>Uncertain cases sent to AI</small>
-          </div>
 
           <div className="performance-item">
-            <span>AI Recommendations</span>
+
+            <span>
+              AI Cases
+            </span>
+
+            <strong>
+              {metrics.ai_cases}
+            </strong>
+
+            <small>
+              Uncertain cases sent to AI
+            </small>
+
+          </div>
+
+
+          <div className="performance-item">
+
+            <span>
+              AI Recommendations
+            </span>
+
             <strong>
               {metrics.ai_recommendations}
             </strong>
+
             <small>
               AI MATCH recommendations
             </small>
+
           </div>
 
-          <div className="performance-item">
-            <span>AI Match Rate</span>
-            <strong>{metrics.ai_match_rate.toFixed(2)}%</strong>
-            <small>AI MATCH recommendations among AI cases</small>
-          </div>
 
           <div className="performance-item">
-            <span>Guard Approved</span>
+
+            <span>
+              AI Match Rate
+            </span>
+
+            <strong>
+              {metrics.ai_match_rate.toFixed(2)}%
+            </strong>
+
+            <small>
+              AI MATCH recommendations among AI cases
+            </small>
+
+          </div>
+
+
+          <div className="performance-item">
+
+            <span>
+              Guard Approved
+            </span>
+
             <strong>
               {metrics.guard_approved}
             </strong>
+
             <small>
               AI matches independently verified
             </small>
+
           </div>
 
+
           <div className="performance-item">
-            <span>AI Matches Blocked</span>
+
+            <span>
+              AI Matches Blocked
+            </span>
+
             <strong>
               {metrics.ai_matches_blocked}
             </strong>
+
             <small>
               Recommendations rejected by guard
             </small>
+
           </div>
 
+
           <div className="performance-item">
-            <span>Guard Approval Accuracy</span>
+
+            <span>
+              Guard Approval Accuracy
+            </span>
+
             <strong>
               {metrics.guard_approval_accuracy.toFixed(2)}%
             </strong>
+
             <small>
               Correctness of approved AI matches
             </small>
+
           </div>
 
+
           <div className="performance-item">
-            <span>Final Match Rate</span>
+
+            <span>
+              Automated Match Rate
+            </span>
+
             <strong>
               {metrics.final_match_rate.toFixed(2)}%
             </strong>
+
             <small>
-              Final verified transaction matches
+              Transactions matched without human intervention
             </small>
+
           </div>
 
         </div>
 
       </div>
+
+
+      {/* HUMAN REVIEW */}
+
+      <div className="dashboard-card">
+
+        <div className="card-header">
+
+          <div>
+
+            <h2>Human Review</h2>
+
+            <p>
+              Manual decisions made on transactions requiring human attention.
+            </p>
+
+          </div>
+
+        </div>
+
+        <div className="performance-grid">
+
+          <div className="performance-item">
+
+            <span>
+              Reviewed
+            </span>
+
+            <strong>
+              {metrics.human_reviewed ?? 0}
+            </strong>
+
+            <small>
+              Transactions reviewed by a human
+            </small>
+
+          </div>
+
+
+          <div className="performance-item">
+
+            <span>
+              Approved
+            </span>
+
+            <strong>
+              {metrics.human_approved ?? 0}
+            </strong>
+
+            <small>
+              Review decisions marked APPROVE
+            </small>
+
+          </div>
+
+
+          <div className="performance-item">
+
+            <span>
+              Rejected
+            </span>
+
+            <strong>
+              {metrics.human_rejected ?? 0}
+            </strong>
+
+            <small>
+              Review decisions marked REJECT
+            </small>
+
+          </div>
+
+
+          <div className="performance-item">
+
+            <span>
+              Unresolved
+            </span>
+
+            <strong>
+              {metrics.human_unresolved ?? 0}
+            </strong>
+
+            <small>
+              Cases left unresolved
+            </small>
+
+          </div>
+
+        </div>
+
+      </div>
+
 
       {/* PRINCIPLE */}
 
@@ -441,7 +654,10 @@ function Dashboard() {
         </div>
 
         <div>
-          <span>CONTROL PRINCIPLE</span>
+
+          <span>
+            CONTROL PRINCIPLE
+          </span>
 
           <h3>
             AI recommends. Verification decides.
@@ -452,6 +668,7 @@ function Dashboard() {
             independent verification and an explicit exception list
             rather than blindly maximizing automation.
           </p>
+
         </div>
 
       </div>

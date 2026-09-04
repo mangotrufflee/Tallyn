@@ -206,153 +206,129 @@ function Transactions() {
                   <th>AI Decision</th>
                   <th>Verification</th>
                   <th>Review</th>
-                  <th></th>
+                  <th>View</th>
                 </tr>
               </thead>
 
               <tbody>
+                {filteredTransactions.map((transaction) => {
 
-                {filteredTransactions.map(
-                  (transaction) => {
+                  const finalStatus = getFinalStatus(transaction);
 
-                    const finalStatus =
-                      getFinalStatus(transaction);
+                  return (
+                    <tr key={transaction.transaction_id}>
 
-                    return (
-                      <tr
-                        key={
-                          transaction.transaction_id
-                        }
-                      >
+                      {/* Transaction */}
+                      <td>
+                        <strong>
+                          {transaction.transaction_id}
+                        </strong>
 
-                        <td>
-                          {transaction.currency || "—"}
-                        </td>
+                        <span className="invoice-subtext">
+                          {transaction.matched_invoice || "No invoice"}
+                        </span>
+                      </td>
 
-                        <td>
-                          {transaction.matched_invoice || "—"}
-                        </td>
+                      {/* Date */}
+                      <td>
+                        {new Date(transaction.date).toLocaleDateString(
+                          "en-IN",
+                          {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                          }
+                        )}
+                      </td>
 
-                        <td>
-                          <strong>
-                            {
-                              transaction.transaction_id
-                            }
-                          </strong>
+                      {/* Counterparty */}
+                      <td>
+                        {transaction.counterparty}
+                      </td>
 
-                          <span className="invoice-subtext">
-                            {
-                              transaction.matched_invoice ||
-                              "No invoice"
-                            }
-                          </span>
-                        </td>
+                      {/* Amount */}
+                      <td>
+                        <strong>
+                          {transaction.currency === "INR"
+                            ? "₹"
+                            : transaction.currency}
 
-                        <td>
-                          <span className={`status-badge ${getStatusClass(
+                          {Number(transaction.amount).toLocaleString("en-IN")}
+                        </strong>
+                      </td>
+
+                      {/* Currency */}
+                      <td>
+                        {transaction.currency || "—"}
+                      </td>
+
+                      {/* Matched Invoice */}
+                      <td>
+                        {transaction.matched_invoice || "—"}
+                      </td>
+
+                      {/* Score */}
+                      <td>
+                        <span
+                          className={
+                            transaction.match_score >= 90
+                              ? "score-high"
+                              : transaction.match_score >= 70
+                              ? "score-medium"
+                              : "score-low"
+                          }
+                        >
+                          {transaction.match_score ?? "—"}
+                        </span>
+                      </td>
+
+                      {/* Deterministic */}
+                      <td>
+                        <span
+                          className={`status-badge ${getStatusClass(
                             transaction.deterministic_status
-                          )}`}>
-                            {transaction.deterministic_status || "—"}
-                          </span>
-                        </td>
+                          )}`}
+                        >
+                          {transaction.deterministic_status || "—"}
+                        </span>
+                      </td>
 
-                        <td>{transaction.ai_decision || "—"}</td>
+                      {/* AI Decision */}
+                      <td>
+                        {transaction.ai_decision || "—"}
+                      </td>
 
-                        <td>
-                          <span className={`status-badge ${getStatusClass(
+                      {/* Verification */}
+                      <td>
+                        <span
+                          className={`status-badge ${getStatusClass(
                             transaction.verification_decision
-                          )}`}>
-                            {transaction.verification_decision || "—"}
-                          </span>
-                        </td>
+                          )}`}
+                        >
+                          {transaction.verification_decision || "—"}
+                        </span>
+                      </td>
 
-                        <td>
-                          {transaction.review_status === "COMPLETED"
-                            ? transaction.review_decision
-                            : "Open"}
-                        </td>
+                      {/* Review */}
+                      <td>
+                        {transaction.review_status === "COMPLETED"
+                          ? transaction.review_decision
+                          : "Open"}
+                      </td>
 
-                        <td>
-                          {new Date(
-                            transaction.date
-                          ).toLocaleDateString(
-                            "en-IN",
-                            {
-                              day: "2-digit",
-                              month: "short",
-                              year: "numeric",
-                            }
-                          )}
-                        </td>
+                      {/* View */}
+                      <td>
+                        <Link
+                          to={`/transactions/${transaction.transaction_id}`}
+                          className="view-link"
+                        >
+                          View →
+                        </Link>
+                      </td>
 
-                        <td>
-                          {transaction.counterparty}
-                        </td>
-
-                        <td>
-                          <strong>
-                            {transaction.currency ===
-                            "INR"
-                              ? "₹"
-                              : transaction.currency}
-
-                            {Number(
-                              transaction.amount
-                            ).toLocaleString("en-IN")}
-                          </strong>
-                        </td>
-
-                        <td>
-                          <span
-                            className={
-                              transaction.match_score >=
-                              90
-                                ? "score-high"
-                                : transaction.match_score >=
-                                  70
-                                ? "score-medium"
-                                : "score-low"
-                            }
-                          >
-                            {transaction.match_score ??
-                              "—"}
-                          </span>
-                        </td>
-
-                        <td>
-                          <span
-                            className={`status-badge ${getStatusClass(
-                              finalStatus
-                            )}`}
-                          >
-                            <span className="status-symbol">
-                              {finalStatus ===
-                              "MATCHED"
-                                ? "✓"
-                                : finalStatus ===
-                                  "REVIEW"
-                                ? "!"
-                                : "×"}
-                            </span>
-
-                            {finalStatus}
-                          </span>
-                        </td>
-
-                        <td>
-                          <Link
-                            to={`/transactions/${transaction.transaction_id}`}
-                            className="view-link"
-                          >
-                            View →
-                          </Link>
-                        </td>
-
-                      </tr>
-                    );
-                  }
-                )}
-
+                    </tr>
+                  );
+                })}
               </tbody>
 
             </table>
