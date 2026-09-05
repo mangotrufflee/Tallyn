@@ -152,6 +152,24 @@ def _get_value(
     return _clean_value(row[column])
 
 
+_DESCRIPTION_UTR_PATTERN = re.compile(
+    r"\b(?:UTR(?:\s*(?:NO|NUMBER))?|SETTLEMENT\s+(?:REFERENCE|REF|UTR)|"
+    r"REFERENCE(?:\s*(?:NO|NUMBER))?|REF(?:\s*(?:NO|NUMBER))?)"
+    r"\s*[:#=/-]?\s*([A-Z0-9][A-Z0-9_-]{3,})\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_description_utr(description: Any) -> Optional[str]:
+    """Extract a marked UTR or settlement reference from a description."""
+    description = _clean_value(description)
+    if description is None:
+        return None
+
+    match = _DESCRIPTION_UTR_PATTERN.search(str(description))
+    return match.group(1).strip() if match else None
+
+
 def _has_any_column(columns: Iterable[Any], aliases: Iterable[str]) -> bool:
     return _find_column(columns, aliases) is not None
 
@@ -234,6 +252,7 @@ BANK_REFERENCE_ALIASES = [
     "ref no",
     "ref no.",
     "bank reference",
+    "bank ref",
     "transaction reference",
     "utr",
     "utr number",
@@ -546,11 +565,14 @@ def normalize_bank_row(
     counterparty = _get_value(row, BANK_COUNTERPARTY_ALIASES) or narration
 
     reference = _get_value(row, BANK_REFERENCE_ALIASES)
-    utr = _get_value(row, BANK_UTR_ALIASES) or reference
+    explicit_utr = _get_value(row, BANK_UTR_ALIASES)
+    extracted_utr = _extract_description_utr(narration)
+    dedicated_bank_ref = _find_column(row.index, ["bank ref"]) is not None
+    utr = explicit_utr or extracted_utr or (None if dedicated_bank_ref else reference)
     settlement_reference = (
         _get_value(row, BANK_SETTLEMENT_REFERENCE_ALIASES)
         or utr
-        or reference
+        or (None if dedicated_bank_ref else reference)
     )
 
     transaction_id = _get_value(row, BANK_TRANSACTION_ID_ALIASES)

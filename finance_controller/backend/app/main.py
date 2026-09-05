@@ -27,6 +27,11 @@ from backend.app.database import (
     load_erp_data,
     seed_database,
     replace_active_batch,
+    create_batch,
+    persist_batch_inputs,
+    persist_batch_results,
+    mark_batch_failed,
+    get_latest_batch_id,
 )
 
 
@@ -431,7 +436,7 @@ def run_ai_on_transaction(
 # RECONCILIATION ENGINE
 # ============================================================
 
-def run_reconciliation(bank=None, erp=None):
+def run_reconciliation(bank=None, erp=None, batch_id=None):
 
     if bank is None:
         bank = load_bank_data()
@@ -582,6 +587,8 @@ def run_reconciliation(bank=None, erp=None):
 
     connection = get_connection()
 
+
+    batch_results = []
 
     for _, row in deterministic_df.iterrows():
 
@@ -791,10 +798,36 @@ def run_reconciliation(bank=None, erp=None):
             ),
         )
 
+        if batch_id is not None:
+            batch_results.append({
+                "transaction_id": str(row["transaction_id"]),
+                "matched_invoice": final_matched_invoice,
+                "match_score": score_float,
+                "deterministic_status": row["deterministic_status"],
+                "reason": row["reason"],
+                "ai_decision": ai_decision,
+                "ai_invoice": ai_invoice,
+                "ai_confidence": ai_confidence,
+                "ai_reason": ai_reason,
+                "ai_risk": ai_risk,
+                "verification_decision": verification_decision,
+                "verification_reason": verification_reason,
+                "verification_checks": verification_checks,
+                "exception_type": None,
+                "exception_reason": (
+                    verification_reason or row["reason"]
+                    if verification_decision == "EXCEPTION"
+                    else None
+                ),
+            })
+
 
     connection.commit()
 
     connection.close()
+
+    if batch_id is not None:
+        persist_batch_results(batch_id, batch_results)
 
 
     return {
@@ -865,33 +898,52 @@ def root():
 
 @app.get("/records")
 def get_records():
-    """Return datasets represented by the active reconciliation database."""
+    """Return completed upload batches, newest first."""
     connection = get_connection()
-    row = connection.execute(
+    rows = connection.execute(
         """
         SELECT
-            COUNT(t.transaction_id) AS transactions,
-            MAX(r.updated_at) AS updated_at
-        FROM transactions t
-        LEFT JOIN reconciliation_results r
-          ON t.transaction_id = r.transaction_id
+            b.batch_id,
+            b.uploaded_at,
+            b.processing_status,
+            COUNT(t.transaction_id) AS transactions
+        FROM batch_runs b
+        LEFT JOIN batch_transactions t ON t.batch_id = b.batch_id
+        WHERE b.processing_status = 'COMPLETED'
+        GROUP BY b.batch_id
+        ORDER BY b.uploaded_at DESC
         """
-    ).fetchone()
+    ).fetchall()
     connection.close()
 
-    if not row or not row["transactions"]:
-        return []
-
-    return [{
-        "id": "active",
-        "transactions": row["transactions"],
-        "updated_at": row["updated_at"],
-    }]
+    return [dict(row) for row in rows]
 
 @app.get("/summary")
 def get_summary():
 
     connection = get_connection()
+
+    batch_id = get_latest_batch_id()
+    if batch_id:
+        counts = connection.execute(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM batch_transactions WHERE batch_id = ?) AS total_transactions,
+                SUM(CASE WHEN verification_decision = 'MATCHED' THEN 1 ELSE 0 END) AS matched,
+                SUM(CASE WHEN verification_decision = 'REVIEW' THEN 1 ELSE 0 END) AS review,
+                SUM(CASE WHEN verification_decision = 'EXCEPTION' THEN 1 ELSE 0 END) AS exceptions
+            FROM batch_reconciliation_results
+            WHERE batch_id = ?
+            """,
+            (batch_id, batch_id),
+        ).fetchone()
+        connection.close()
+        return {
+            "total_transactions": counts["total_transactions"] or 0,
+            "matched": counts["matched"] or 0,
+            "review": counts["review"] or 0,
+            "exceptions": counts["exceptions"] or 0,
+        }
 
 
     total = connection.execute(
@@ -968,8 +1020,27 @@ def get_metrics():
     """
     connection = get_connection()
 
-    rows = connection.execute(
-        """
+    batch_id = get_latest_batch_id()
+
+    if batch_id:
+        rows = connection.execute(
+            """
+            SELECT
+                matched_invoice,
+                verification_decision,
+                ai_decision,
+                ai_invoice,
+                NULL AS review_status,
+                NULL AS review_decision,
+                NULL AS expected_invoice
+            FROM batch_reconciliation_results
+            WHERE batch_id = ?
+            """,
+            (batch_id,),
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            """
         SELECT
             r.matched_invoice,
             r.verification_decision,
@@ -981,8 +1052,8 @@ def get_metrics():
         FROM reconciliation_results r
         LEFT JOIN ground_truth g
           ON r.transaction_id = g.transaction_id
-        """
-    ).fetchall()
+            """
+        ).fetchall()
 
     def norm(value):
         if value is None:
@@ -1196,6 +1267,26 @@ def get_ai_insights():
 
     connection = get_connection()
 
+    batch_id = get_latest_batch_id()
+    if batch_id:
+        rows = connection.execute(
+            """
+            SELECT
+                t.transaction_id, t.date, t.counterparty, t.amount, t.currency,
+                r.matched_invoice, r.match_score, r.deterministic_status,
+                r.ai_decision, r.ai_invoice, r.ai_confidence, r.ai_reason, r.ai_risk,
+                r.verification_decision, r.verification_reason
+            FROM batch_transactions t
+            INNER JOIN batch_reconciliation_results r
+              ON t.batch_id = r.batch_id AND t.transaction_id = r.transaction_id
+            WHERE t.batch_id = ? AND r.ai_decision IS NOT NULL
+            ORDER BY t.transaction_id
+            """,
+            (batch_id,),
+        ).fetchall()
+        connection.close()
+        return [dict(row) for row in rows]
+
     rows = connection.execute(
         """
         SELECT
@@ -1243,39 +1334,37 @@ def get_ai_insights():
 def get_verification_data():
     connection = get_connection()
 
-    rows = connection.execute("""
+    batch_id = get_latest_batch_id()
+    if batch_id:
+        rows = connection.execute(
+            """
+            SELECT
+                t.transaction_id, t.date, t.counterparty, t.amount, t.currency,
+                r.matched_invoice, r.match_score, r.deterministic_status,
+                r.ai_decision, r.ai_invoice, r.ai_confidence, r.ai_reason, r.ai_risk,
+                r.verification_decision, r.verification_reason, r.verification_checks,
+                NULL AS review_status, NULL AS review_decision,
+                NULL AS reviewer_note, NULL AS reviewed_at
+            FROM batch_transactions t
+            INNER JOIN batch_reconciliation_results r
+              ON t.batch_id = r.batch_id AND t.transaction_id = r.transaction_id
+            WHERE t.batch_id = ?
+            ORDER BY t.transaction_id
+            """,
+            (batch_id,),
+        ).fetchall()
+    else:
+        rows = connection.execute("""
         SELECT
-            t.transaction_id,
-            t.date,
-            t.counterparty,
-            t.amount,
-            t.currency,
-
-            r.matched_invoice,
-            r.match_score,
-            r.deterministic_status,
-
-            r.ai_decision,
-            r.ai_invoice,
-            r.ai_confidence,
-            r.ai_reason,
-            r.ai_risk,
-
-            r.verification_decision,
-            r.verification_reason,
-            r.verification_checks,
-
-            r.review_status,
-            r.review_decision,
-            r.reviewer_note,
-            r.reviewed_at
-
+            t.transaction_id, t.date, t.counterparty, t.amount, t.currency,
+            r.matched_invoice, r.match_score, r.deterministic_status,
+            r.ai_decision, r.ai_invoice, r.ai_confidence, r.ai_reason, r.ai_risk,
+            r.verification_decision, r.verification_reason, r.verification_checks,
+            r.review_status, r.review_decision, r.reviewer_note, r.reviewed_at
         FROM transactions t
-        INNER JOIN reconciliation_results r
-            ON t.transaction_id = r.transaction_id
-
+        INNER JOIN reconciliation_results r ON t.transaction_id = r.transaction_id
         ORDER BY t.transaction_id
-    """).fetchall()
+        """).fetchall()
 
     connection.close()
 
@@ -1312,9 +1401,28 @@ def get_transactions():
 
     connection = get_connection()
 
-
-    rows = connection.execute(
-        """
+    batch_id = get_latest_batch_id()
+    if batch_id:
+        rows = connection.execute(
+            """
+            SELECT
+                t.transaction_id, t.date, t.counterparty, t.amount, t.currency,
+                t.original_data, r.matched_invoice, r.match_score,
+                r.deterministic_status, r.ai_decision, r.ai_invoice,
+                r.ai_confidence, r.ai_risk, r.verification_decision,
+                r.verification_reason, NULL AS review_status,
+                NULL AS review_decision, NULL AS reviewer_note, NULL AS reviewed_at
+            FROM batch_transactions t
+            LEFT JOIN batch_reconciliation_results r
+              ON t.batch_id = r.batch_id AND t.transaction_id = r.transaction_id
+            WHERE t.batch_id = ?
+            ORDER BY t.transaction_id
+            """,
+            (batch_id,),
+        ).fetchall()
+    else:
+        rows = connection.execute(
+            """
         SELECT
 
             t.transaction_id,
@@ -1351,8 +1459,8 @@ def get_transactions():
 
         ORDER BY
             t.transaction_id
-        """
-    ).fetchall()
+            """
+        ).fetchall()
 
 
     connection.close()
@@ -1381,6 +1489,48 @@ def get_transaction(
 ):
 
     connection = get_connection()
+
+    batch_id = get_latest_batch_id()
+    if batch_id:
+        row = connection.execute(
+            """
+            SELECT
+                t.transaction_id, t.date, t.counterparty, t.amount, t.currency,
+                t.original_data, r.matched_invoice, r.match_score,
+                r.deterministic_status, r.reason, r.ai_decision, r.ai_invoice,
+                r.ai_confidence, r.ai_reason, r.ai_risk, r.verification_decision,
+                r.verification_reason, r.verification_checks, r.review_status,
+                r.review_decision, r.reviewer_note, r.reviewed_at
+            FROM batch_transactions t
+            LEFT JOIN batch_reconciliation_results r
+              ON t.batch_id = r.batch_id AND t.transaction_id = r.transaction_id
+            WHERE t.batch_id = ? AND t.transaction_id = ?
+            """,
+            (batch_id, transaction_id),
+        ).fetchone()
+        if row is not None:
+            result = dict(row)
+            connection.close()
+            result["bank_fields"] = decode_original_fields(
+                result.pop("original_data", None)
+            )
+            if result.get("matched_invoice"):
+                erp_connection = get_connection()
+                erp_row = erp_connection.execute(
+                    """
+                    SELECT original_data FROM batch_erp_records
+                    WHERE batch_id = ? AND invoice_id = ?
+                    """,
+                    (batch_id, result["matched_invoice"]),
+                ).fetchone()
+                erp_connection.close()
+                result["erp_fields"] = (
+                    decode_original_fields(erp_row["original_data"])
+                    if erp_row else {}
+                )
+            else:
+                result["erp_fields"] = {}
+            return result
 
 
     row = connection.execute(
@@ -1473,6 +1623,22 @@ def get_exceptions():
 
     connection = get_connection()
 
+    batch_id = get_latest_batch_id()
+    if batch_id:
+        rows = connection.execute(
+            """
+            SELECT r.*
+            FROM batch_reconciliation_results r
+            WHERE r.batch_id = ?
+              AND r.verification_decision IN ('REVIEW', 'EXCEPTION')
+                            AND COALESCE(r.review_status, '') != 'COMPLETED'
+            ORDER BY r.transaction_id
+            """,
+            (batch_id,),
+        ).fetchall()
+        connection.close()
+        return [dict(row) for row in rows]
+
 
     rows = connection.execute(
         """
@@ -1549,6 +1715,43 @@ def review_transaction(
 
 
     connection = get_connection()
+
+    batch_id = get_latest_batch_id()
+    if batch_id:
+        existing = connection.execute(
+            """
+            SELECT * FROM batch_reconciliation_results
+            WHERE batch_id = ? AND transaction_id = ?
+            """,
+            (batch_id, transaction_id),
+        ).fetchone()
+        if existing is None:
+            connection.close()
+            raise HTTPException(status_code=404, detail="Transaction reconciliation result not found")
+
+        final_decision = {
+            "APPROVE": "MATCHED",
+            "REJECT": "EXCEPTION",
+            "UNRESOLVED": "REVIEW",
+        }[decision]
+        connection.execute(
+            """
+            UPDATE batch_reconciliation_results
+            SET verification_decision = ?, review_status = 'COMPLETED',
+                review_decision = ?, reviewer_note = ?, reviewed_at = CURRENT_TIMESTAMP
+            WHERE batch_id = ? AND transaction_id = ?
+            """,
+            (final_decision, decision, review.note.strip(), batch_id, transaction_id),
+        )
+        connection.commit()
+        connection.close()
+        return {
+            "status": "completed",
+            "transaction_id": transaction_id,
+            "review_decision": decision,
+            "final_decision": final_decision,
+            "batch_id": batch_id,
+        }
 
 
     existing = connection.execute(
@@ -1752,10 +1955,43 @@ async def reconcile_uploaded_batch(
         )
 
     initialize_database()
-    replace_active_batch(bank, erp)
-    result = run_reconciliation(bank, erp)
+    file_infos = [
+        {
+            "filename": bank_info.get("filename"),
+            "source_type": bank_info.get("source_type"),
+            "role": "bank",
+            "records": bank_info.get("records", 0),
+        }
+    ]
+    if erp_info.get("files"):
+        file_infos.extend(
+            {
+                "filename": item.get("filename"),
+                "source_type": item.get("source_type"),
+                "role": "supporting",
+                "records": item.get("records", 0),
+            }
+            for item in erp_info["files"]
+        )
+    else:
+        file_infos.append({
+            "filename": erp_info.get("filename"),
+            "source_type": erp_info.get("source_type"),
+            "role": "supporting",
+            "records": erp_info.get("records", 0),
+        })
+
+    batch_id = create_batch(file_infos)
+    try:
+        persist_batch_inputs(batch_id, bank, erp)
+        result = run_reconciliation(bank, erp, batch_id=batch_id)
+    except Exception as exc:
+        mark_batch_failed(batch_id, exc)
+        raise HTTPException(status_code=500, detail="Reconciliation failed") from exc
+
     return {
         "status": "completed",
+        "batch_id": batch_id,
         "bank": bank_info,
         "erp": erp_info,
         **result,

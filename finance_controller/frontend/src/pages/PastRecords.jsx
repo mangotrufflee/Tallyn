@@ -92,13 +92,13 @@ export default function PastRecords() {
               {records.map((entry) => (
                 <tr key={entry.id}>
                   <td>
-                    <strong>{entry.id}</strong>
+                    <strong>{entry.batch_id}</strong>
                     <span className="invoice-subtext">Backend dataset record</span>
                   </td>
                   <td>Not recorded</td>
                   <td>{entry.transactions}</td>
-                  <td>{formatDateLabel(entry.updated_at)}</td>
-                  <td>Active dataset</td>
+                  <td>{formatDateLabel(entry.uploaded_at)}</td>
+                  <td>{entry.processing_status}</td>
                   <td>
                     <Link to="/dashboard" className="view-link">
                       View Dashboard →

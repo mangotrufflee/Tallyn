@@ -6,6 +6,7 @@ from backend.app.reconciliation.matcher import (
     normalize_settlement_reference,
     settlement_reference_similarity,
 )
+from backend.app.ingestion.normalizer import normalize_bank_dataframe
 
 
 def make_bank(**overrides):
@@ -44,6 +45,30 @@ def test_exact_settlement_utr_match():
     scores = calculate_match_score(bank, erp)
 
     assert settlement_reference_similarity(bank, erp) == 100
+    assert scores["settlement_reference_score"] == 100
+    assert scores["final_score"] == 100
+
+
+def test_description_utr_matches_different_transaction_and_invoice_ids():
+    bank = normalize_bank_dataframe(pd.DataFrame([{
+        "transaction_id": "RZP-TXN-001",
+        "date": "2026-09-01",
+        "counterparty": "UrbanCart",
+        "amount": 13375,
+        "bank_ref": "BNK-00001",
+        "description": "RAZORPAY SETTLEMENT UTR RZP260001",
+    }])).iloc[0]
+    bank["date"] = pd.Timestamp(bank["date"])
+    erp = make_erp(
+        invoice_id="RZP-SET-001",
+        vendor="Urban Cart",
+        amount=13375.0,
+        reference="RZP260001",
+    )
+
+    scores = calculate_match_score(bank, erp)
+
+    assert bank["transaction_id"] != erp["invoice_id"]
     assert scores["settlement_reference_score"] == 100
     assert scores["final_score"] == 100
 

@@ -74,6 +74,72 @@ def test_axis_style_bank_statement():
     assert row["bank_utr"] == "RZPXYZ789"
 
 
+def test_utr_is_extracted_from_bank_description():
+    df = pd.DataFrame([{
+        "transaction_id": "RZP-TXN-001",
+        "date": "2026-09-01",
+        "counterparty": "UrbanCart",
+        "amount": "13375",
+        "bank_ref": "BNK-00001",
+        "description": "RAZORPAY SETTLEMENT UTR RZP260001",
+    }])
+
+    row = normalize_bank_dataframe(df).iloc[0]
+
+    assert row["description"] == "RAZORPAY SETTLEMENT UTR RZP260001"
+    assert row["bank_reference"] == "BNK-00001"
+    assert row["bank_utr"] == "RZP260001"
+    assert row["settlement_reference"] == "RZP260001"
+
+
+def test_explicit_bank_utr_takes_precedence_over_description():
+    df = pd.DataFrame([{
+        "transaction_id": "TXN-001",
+        "date": "2026-09-01",
+        "amount": "100",
+        "bank_ref": "BNK-00001",
+        "utr": "EXPLICIT-UTR-01",
+        "description": "RAZORPAY SETTLEMENT UTR EXTRACTED-UTR-02",
+    }])
+
+    row = normalize_bank_dataframe(df).iloc[0]
+
+    assert row["bank_reference"] == "BNK-00001"
+    assert row["bank_utr"] == "EXPLICIT-UTR-01"
+    assert row["settlement_reference"] == "EXPLICIT-UTR-01"
+
+
+def test_description_without_utr_does_not_create_settlement_utr():
+    df = pd.DataFrame([{
+        "transaction_id": "TXN-001",
+        "date": "2026-09-01",
+        "amount": "100",
+        "bank_ref": "BNK-00001",
+        "description": "RAZORPAY SETTLEMENT PAYMENT",
+    }])
+
+    row = normalize_bank_dataframe(df).iloc[0]
+
+    assert row["description"] == "RAZORPAY SETTLEMENT PAYMENT"
+    assert row["bank_reference"] == "BNK-00001"
+    assert pd.isna(row["bank_utr"])
+    assert pd.isna(row["settlement_reference"])
+
+
+def test_synthetic_utr_values_are_extracted_generically():
+    df = pd.DataFrame([{
+        "transaction_id": "TXN-001",
+        "date": "2026-09-01",
+        "amount": "100",
+        "description": "Settlement reference: SYNTHETIC-UTR-98765",
+    }])
+
+    row = normalize_bank_dataframe(df).iloc[0]
+
+    assert row["bank_utr"] == "SYNTHETIC-UTR-98765"
+    assert row["settlement_reference"] == "SYNTHETIC-UTR-98765"
+
+
 def test_razorpay_settlement():
     df = pd.DataFrame([
         {
