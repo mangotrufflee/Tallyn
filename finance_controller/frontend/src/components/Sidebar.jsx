@@ -29,17 +29,9 @@ function Sidebar() {
         <div className="nav-section">
           <p className="nav-label">WORKFLOW</p>
 
-          <NavLink to="/" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} end>
+          <NavLink to="/dashboard" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} end>
             <span>▦</span>
             Dashboard
-          </NavLink>
-
-          <NavLink
-            to="/new-reconciliation"
-            className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-          >
-            <span>＋</span>
-            New Reconciliation
           </NavLink>
 
           <NavLink
@@ -51,11 +43,11 @@ function Sidebar() {
           </NavLink>
 
           <NavLink
-            to="/exceptions"
+            to="/ai-cases"
             className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           >
             <span>⚠</span>
-            Exceptions
+            AI Cases
             {exceptions > 0 && <em className="nav-badge">{exceptions}</em>}
           </NavLink>
 

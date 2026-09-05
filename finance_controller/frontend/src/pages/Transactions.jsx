@@ -34,7 +34,9 @@ function Transactions() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [aiFilter, setAiFilter] = useState("ALL");
+  const [currentPage, setCurrentPage] = useState(1);
   const [error, setError] = useState(null);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     getTransactions()
@@ -87,6 +89,17 @@ function Transactions() {
       );
     }
   );
+
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const visibleTransactions = filteredTransactions.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, statusFilter, aiFilter]);
 
  return (
   <>
@@ -213,7 +226,7 @@ function Transactions() {
               </thead>
 
               <tbody>
-                {filteredTransactions.map((transaction) => {
+                {visibleTransactions.map((transaction) => {
 
                   return (
                     <tr key={transaction.transaction_id}>
@@ -332,6 +345,31 @@ function Transactions() {
               </tbody>
 
             </table>
+
+            <div className="pagination">
+              <div className="pagination-controls">
+                <button
+                  type="button"
+                  className="pagination-button"
+                  disabled={safePage === 1}
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                >
+                  Prev
+                </button>
+                <span className="page-chip">Page {safePage} of {totalPages}</span>
+                <button
+                  type="button"
+                  className="pagination-button"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                >
+                  Next
+                </button>
+              </div>
+              <div className="page-chip">
+                {filteredTransactions.length} total items
+              </div>
+            </div>
 
           </div>
 

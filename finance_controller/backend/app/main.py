@@ -63,7 +63,13 @@ def decode_original_fields(value):
     if not value:
         return {}
     try:
-        return json.loads(value)
+        data = json.loads(value)
+        if isinstance(data, dict):
+            return {
+                k: (None if isinstance(v, float) and (pd.isna(v) or v != v) else v)
+                for k, v in data.items()
+            }
+        return data
     except (TypeError, json.JSONDecodeError):
         return {"raw": value}
 
@@ -198,165 +204,227 @@ def run_ai_on_transaction(
     bank_row,
     erp
 ):
+    try:
+        if isinstance(erp, pd.DataFrame) and not erp.empty and "date" in erp.columns:
+            if not pd.api.types.is_datetime64_any_dtype(erp["date"]):
+                erp = erp.copy()
+                erp["date"] = pd.to_datetime(erp["date"])
+        if isinstance(bank_row, (pd.Series, dict)) and "date" in bank_row:
+            if not isinstance(bank_row.get("date"), (pd.Timestamp, pd.DatetimeIndex)):
+                bank_row = bank_row.copy()
+                bank_row["date"] = pd.to_datetime(bank_row["date"])
 
-    candidates = find_top_candidates(
-        bank_row,
-        erp,
-        top_n=5
-    )
-    # Note: enrich_candidates_with_source_rows is called inside
-    # build_ai_prompt — do not call it again here to avoid double-enrichment.
-
-    allowed_ids = [
-        candidate.get("invoice_id")
-        for candidate in candidates
-        if candidate.get("invoice_id") not in (None, "")
-    ]
-
-    # No candidates → EXCEPTION without calling the model.
-    if len(candidates) == 0:
-        return {
-            "ai_decision": "EXCEPTION",
-            "ai_invoice": None,
-            "ai_confidence": 0,
-            "ai_reason": "No ERP candidates available",
-            "ai_risk": "HIGH",
-            "verification_decision": "EXCEPTION",
-            "verification_reason": "No ERP candidates available",
-            "verification_checks": None,
-        }
-
-    prompt = build_ai_prompt(
-        bank_row,
-        candidates,
-        erp=erp,
-    )
-
-    ai_call = safe_ask_ai(prompt)
-    if not ai_call["ok"]:
-        return {
-            "ai_decision": "REVIEW",
-            "ai_invoice": None,
-            "ai_confidence": 0,
-            "ai_reason": ai_call["error"],
-            "ai_risk": "HIGH",
-            "verification_decision": "REVIEW",
-            "verification_reason": "AI unavailable or failed",
-            "verification_checks": None,
-        }
-
-    validation = validate_ai_response(
-        ai_call["raw"],
-        allowed_invoice_ids=allowed_ids,
-    )
-
-    # Invalid / hallucinated AI output → REVIEW (never auto MATCH).
-    if not validation["valid"]:
-        return {
-            "ai_decision": "REVIEW",
-            "ai_invoice": None,
-            "ai_confidence": 0,
-            "ai_reason": validation["error"],
-            "ai_risk": "HIGH",
-            "verification_decision": "REVIEW",
-            "verification_reason": (
-                "Invalid or unsafe AI response: "
-                f"{validation['error']}"
-            ),
-            "verification_checks": None,
-        }
-
-    result = validation["result"]
-    ai_decision = result["decision"]
-    ai_invoice = result["selected_invoice"]
-
-    if not ai_invoice:
-        verification_decision = (
-            "EXCEPTION"
-            if ai_decision == "EXCEPTION"
-            else "REVIEW"
+        candidates = find_top_candidates(
+            bank_row,
+            erp,
+            top_n=5
         )
-        verification_reason = (
-            "AI could not confidently select a candidate"
-            if verification_decision == "REVIEW"
-            else "AI marked the case as EXCEPTION"
+        # Note: enrich_candidates_with_source_rows is called inside
+        # build_ai_prompt — do not call it again here to avoid double-enrichment.
+
+        allowed_ids = [
+            candidate.get("invoice_id")
+            for candidate in candidates
+            if candidate.get("invoice_id") not in (None, "")
+        ]
+
+        # No candidates → EXCEPTION without calling the model.
+        if len(candidates) == 0:
+            return {
+                "ai_decision": "EXCEPTION",
+                "ai_invoice": None,
+                "ai_confidence": 0,
+                "ai_reason": "No ERP candidates available",
+                "ai_risk": "HIGH",
+                "verification_decision": "EXCEPTION",
+                "verification_reason": "No ERP candidates available",
+                "verification_checks": None,
+            }
+
+        prompt = build_ai_prompt(
+            bank_row,
+            candidates,
+            erp=erp,
         )
+
+        ai_call = safe_ask_ai(prompt)
+        if not ai_call["ok"]:
+            return {
+                "ai_decision": "REVIEW",
+                "ai_invoice": None,
+                "ai_confidence": 0,
+                "ai_reason": ai_call["error"],
+                "ai_risk": "HIGH",
+                "verification_decision": "REVIEW",
+                "verification_reason": f"AI unavailable or failed: {ai_call['error']}",
+                "verification_checks": None,
+            }
+
+        validation = validate_ai_response(
+            ai_call["raw"],
+            allowed_invoice_ids=allowed_ids,
+        )
+
+        # Invalid / hallucinated AI output → REVIEW (never auto MATCH).
+        if not validation["valid"]:
+            return {
+                "ai_decision": "REVIEW",
+                "ai_invoice": None,
+                "ai_confidence": 0,
+                "ai_reason": validation["error"],
+                "ai_risk": "HIGH",
+                "verification_decision": "REVIEW",
+                "verification_reason": (
+                    "Invalid or unsafe AI response: "
+                    f"{validation['error']}"
+                ),
+                "verification_checks": None,
+            }
+
+        result = validation["result"]
+        ai_decision = result["decision"]
+        ai_invoice = result["selected_invoice"]
+
+        if not ai_invoice:
+            verification_decision = (
+                "EXCEPTION"
+                if ai_decision == "EXCEPTION"
+                else "REVIEW"
+            )
+            verification_reason = (
+                result.get("reason")
+                or (
+                    "AI marked the case as EXCEPTION"
+                    if verification_decision == "EXCEPTION"
+                    else "AI could not confidently select a candidate"
+                )
+            )
+            return {
+                "ai_decision": ai_decision,
+                "ai_invoice": None,
+                "ai_confidence": result["confidence"],
+                "ai_reason": result["reason"],
+                "ai_risk": result["risk"],
+                "verification_decision": verification_decision,
+                "verification_reason": verification_reason,
+                "verification_checks": None,
+            }
+
+        selection = verify_selected_candidate(
+            ai_invoice,
+            candidates,
+        )
+        selection_decision = (
+            selection.get("decision")
+            if isinstance(selection, dict)
+            else None
+        )
+        if selection_decision == "EXCEPTION":
+            return {
+                "ai_decision": "REVIEW",
+                "ai_invoice": ai_invoice,
+                "ai_confidence": result["confidence"],
+                "ai_reason": result["reason"],
+                "ai_risk": "HIGH",
+                "verification_decision": "REVIEW",
+                "verification_reason": selection.get(
+                    "reason",
+                    "AI selected an invoice outside the candidate set",
+                ),
+                "verification_checks": None,
+            }
+
+        if selection_decision == "REVIEW" and selection.get("exception_type") == "DUPLICATE_SETTLEMENT":
+            return {
+                "ai_decision": ai_decision,
+                "ai_invoice": ai_invoice,
+                "ai_confidence": result["confidence"],
+                "ai_reason": result["reason"],
+                "ai_risk": result["risk"],
+                "verification_decision": "REVIEW",
+                "verification_reason": selection.get("reason"),
+                "verification_checks": None,
+            }
+
+        # If AI itself did not recommend MATCH (e.g. REVIEW or EXCEPTION), preserve that decision
+        if ai_decision != "MATCH":
+            return {
+                "ai_decision": ai_decision,
+                "ai_invoice": ai_invoice,
+                "ai_confidence": result["confidence"],
+                "ai_reason": result["reason"],
+                "ai_risk": result["risk"],
+                "verification_decision": ai_decision,
+                "verification_reason": result.get("reason") or f"AI recommended {ai_decision}",
+                "verification_checks": None,
+            }
+
+        # AI recommended MATCH → Run Verification Guard
+        selected_erp = None
+        normalized_erp_invoice_ids = (
+            pd.Series(erp["invoice_id"], copy=True)
+            .astype("string")
+            .fillna("")
+            .str.strip()
+            .str.lower()
+        )
+        target_invoice_id = str(ai_invoice).strip().lower()
+        matches = erp.loc[normalized_erp_invoice_ids == target_invoice_id].copy()
+        if not matches.empty:
+            selected_erp = matches.iloc[0]
+
+        verification_checks = verify_ai_match(
+            bank_row,
+            selected_erp,
+        )
+        verification_decision = get_final_decision(
+            verification_checks,
+        )
+
+        if verification_decision == "MATCHED":
+            verification_reason = "Verification Guard approved match"
+        else:
+            if not verification_checks.get("candidate_exists"):
+                verification_reason = "Verification Guard rejected: candidate does not exist in ERP"
+            elif verification_checks.get("material_amount_conflict"):
+                verification_reason = f"Verification Guard rejected: material amount conflict (diff: {verification_checks.get('amount_difference')})"
+            elif verification_checks.get("material_date_conflict"):
+                verification_reason = f"Verification Guard rejected: material date conflict (diff: {verification_checks.get('date_difference')} days)"
+            elif verification_checks.get("reference_conflict"):
+                verification_reason = "Verification Guard rejected: cross-reference conflict"
+            elif not verification_checks.get("amount_matches"):
+                verification_reason = f"Verification Guard rejected: amount mismatch (diff: {verification_checks.get('amount_difference')})"
+            elif not verification_checks.get("date_matches"):
+                verification_reason = f"Verification Guard rejected: date mismatch (diff: {verification_checks.get('date_difference')} days)"
+            elif verification_checks.get("vendor_similarity", 0) < 70:
+                verification_reason = f"Verification Guard rejected: vendor similarity below threshold ({verification_checks.get('vendor_similarity')}%)"
+            elif not (verification_checks.get("reference_matches") is True or verification_checks.get("settlement_reference_matches") is True):
+                verification_reason = "Verification Guard rejected: unconfirmed cross-system reference"
+            else:
+                verification_reason = "Verification Guard rejected: verification criteria not satisfied"
+
         return {
             "ai_decision": ai_decision,
-            "ai_invoice": None,
+            "ai_invoice": ai_invoice,
             "ai_confidence": result["confidence"],
             "ai_reason": result["reason"],
             "ai_risk": result["risk"],
             "verification_decision": verification_decision,
             "verification_reason": verification_reason,
-            "verification_checks": None,
+            "verification_checks": str(verification_checks),
         }
 
-    selection = verify_selected_candidate(
-        ai_invoice,
-        candidates,
-    )
-    selection_decision = (
-        selection.get("decision")
-        if isinstance(selection, dict)
-        else None
-    )
-    if selection_decision == "EXCEPTION":
+    except Exception as exc:
         return {
             "ai_decision": "REVIEW",
-            "ai_invoice": ai_invoice,
-            "ai_confidence": result["confidence"],
-            "ai_reason": result["reason"],
+            "ai_invoice": None,
+            "ai_confidence": 0,
+            "ai_reason": f"AI routing error: {str(exc)}",
             "ai_risk": "HIGH",
             "verification_decision": "REVIEW",
-            "verification_reason": selection.get(
-                "reason",
-                "AI selected an invoice outside the candidate set",
-            ),
+            "verification_reason": f"AI routing error fallback: {str(exc)}",
             "verification_checks": None,
         }
-
-    if selection_decision == "REVIEW" and selection.get("exception_type") == "DUPLICATE_SETTLEMENT":
-        return {
-            "ai_decision": ai_decision,
-            "ai_invoice": ai_invoice,
-            "ai_confidence": result["confidence"],
-            "ai_reason": result["reason"],
-            "ai_risk": result["risk"],
-            "verification_decision": "REVIEW",
-            "verification_reason": selection.get("reason"),
-            "verification_checks": None,
-        }
-
-    selected_erp = None
-    matches = erp[
-        erp["invoice_id"]
-        .astype(str)
-        .str.strip()
-        ==
-        str(ai_invoice).strip()
-    ]
-    if not matches.empty:
-        selected_erp = matches.iloc[0]
-
-    verification_checks = verify_ai_match(
-        bank_row,
-        selected_erp,
-    )
-    verification_decision = get_final_decision(
-        verification_checks,
-    )
-
-    return {
-        "ai_decision": ai_decision,
-        "ai_invoice": ai_invoice,
-        "ai_confidence": result["confidence"],
-        "ai_reason": result["reason"],
-        "ai_risk": result["risk"],
-        "verification_decision": verification_decision,
-        "verification_reason": None,
-        "verification_checks": str(verification_checks),
-    }
 
 
 # ============================================================
@@ -370,6 +438,16 @@ def run_reconciliation(bank=None, erp=None):
 
     if erp is None:
         erp = load_erp_data()
+
+    if isinstance(bank, pd.DataFrame) and not bank.empty and "date" in bank.columns:
+        if not pd.api.types.is_datetime64_any_dtype(bank["date"]):
+            bank = bank.copy()
+            bank["date"] = pd.to_datetime(bank["date"])
+
+    if isinstance(erp, pd.DataFrame) and not erp.empty and "date" in erp.columns:
+        if not pd.api.types.is_datetime64_any_dtype(erp["date"]):
+            erp = erp.copy()
+            erp["date"] = pd.to_datetime(erp["date"])
 
 
     deterministic_results = []
@@ -550,6 +628,8 @@ def run_reconciliation(bank=None, erp=None):
 
             verification_checks = None
 
+            final_matched_invoice = row["matched_invoice"]
+
 
         # ----------------------------------------------------
         # AI result
@@ -597,6 +677,35 @@ def run_reconciliation(bank=None, erp=None):
                 )
             )
 
+            if verification_decision == "MATCHED":
+                final_matched_invoice = ai_invoice or row["matched_invoice"]
+            elif verification_decision == "REVIEW":
+                final_matched_invoice = ai_invoice or row["matched_invoice"]
+            else:
+                final_matched_invoice = None
+
+        score_val = row.get("match_score")
+        try:
+            if score_val is None:
+                score_float = 0.0
+            else:
+                score_float = float(score_val)
+                if pd.isna(score_float) or score_float != score_float:
+                    score_float = 0.0
+        except (TypeError, ValueError):
+            try:
+                if score_val is None:
+                    score_float = 0.0
+                else:
+                    score_text = str(score_val).strip()
+                    if score_text in {"", "nan", "NaN", "None", "null"}:
+                        score_float = 0.0
+                    else:
+                        score_float = float(score_text)
+                        if pd.isna(score_float) or score_float != score_float:
+                            score_float = 0.0
+            except (TypeError, ValueError):
+                score_float = 0.0
 
         connection.execute(
             """
@@ -656,9 +765,9 @@ def run_reconciliation(bank=None, erp=None):
             (
                 str(row["transaction_id"]),
 
-                row["matched_invoice"],
+                final_matched_invoice,
 
-                float(row["match_score"]),
+                score_float,
 
                 row["deterministic_status"],
 
@@ -753,6 +862,31 @@ def root():
 # ============================================================
 # SUMMARY
 # ============================================================
+
+@app.get("/records")
+def get_records():
+    """Return datasets represented by the active reconciliation database."""
+    connection = get_connection()
+    row = connection.execute(
+        """
+        SELECT
+            COUNT(t.transaction_id) AS transactions,
+            MAX(r.updated_at) AS updated_at
+        FROM transactions t
+        LEFT JOIN reconciliation_results r
+          ON t.transaction_id = r.transaction_id
+        """
+    ).fetchone()
+    connection.close()
+
+    if not row or not row["transactions"]:
+        return []
+
+    return [{
+        "id": "active",
+        "transactions": row["transactions"],
+        "updated_at": row["updated_at"],
+    }]
 
 @app.get("/summary")
 def get_summary():
@@ -1227,6 +1361,9 @@ def get_transactions():
     results = []
     for row in rows:
         item = dict(row)
+        for k, v in item.items():
+            if isinstance(v, float) and (pd.isna(v) or v != v):
+                item[k] = None
         item["bank_fields"] = decode_original_fields(
             item.pop("original_data", None)
         )
@@ -1304,6 +1441,9 @@ def get_transaction(
 
 
     result = dict(row)
+    for k, v in result.items():
+        if isinstance(v, float) and (pd.isna(v) or v != v):
+            result[k] = None
     result["bank_fields"] = decode_original_fields(
         result.pop("original_data", None)
     )

@@ -206,6 +206,7 @@ export default function NewReconciliation() {
       ]);
       const list = Array.isArray(transactions) ? transactions : transactions.transactions || [];
       setResults({ summary, metrics, transactions: list });
+      navigate("/dashboard");
     } catch (requestError) {
       setError(requestError.message || "Unable to run reconciliation.");
     } finally {
@@ -231,7 +232,7 @@ export default function NewReconciliation() {
           <div>
             <span className="dashboard-eyebrow">RECONCILIATION RESULTS</span>
             <h1>Batch complete</h1>
-            <p>Operational outcomes from the current uploaded batch. Quality scores from Track 04 stay on the dashboard.</p>
+            <p>Operational outcomes from the current uploaded batch.</p>
           </div>
           <span className="batch-badge">Current batch</span>
         </div>
@@ -248,9 +249,9 @@ export default function NewReconciliation() {
         <div className="performance-grid results-breakdown">
           <div className="performance-item"><span>Deterministic Matches</span><strong>{deterministicMatches}</strong><small>Matched without AI</small></div>
           <div className="performance-item"><span>AI-Assisted Cases</span><strong>{aiAssisted}</strong><small>Sent to the AI reasoner</small></div>
-          <div className="performance-item"><span>AI Recommendations</span><strong>{metrics.ai_recommendations ?? 0}</strong><small>AI MATCH recommendations</small></div>
-          <div className="performance-item"><span>Guard Approved</span><strong>{metrics.guard_approved ?? 0}</strong><small>AI matches verified</small></div>
-          <div className="performance-item"><span>Guard Rejected</span><strong>{metrics.ai_matches_blocked ?? 0}</strong><small>AI matches blocked</small></div>
+          <div className="performance-item"><span>AI Recommendations</span><strong>{metrics.ai_recommendations == null ? "—" : metrics.ai_recommendations}</strong><small>AI MATCH recommendations</small></div>
+          <div className="performance-item"><span>Guard Approved</span><strong>{metrics.guard_approved == null ? "—" : metrics.guard_approved}</strong><small>AI matches verified</small></div>
+          <div className="performance-item"><span>Guard Rejected</span><strong>{metrics.ai_matches_blocked == null ? "—" : metrics.ai_matches_blocked}</strong><small>AI matches blocked</small></div>
           <div className="performance-item"><span>Human Review</span><strong>{humanReview}</strong><small>Needs a human decision</small></div>
         </div>
 
@@ -258,20 +259,17 @@ export default function NewReconciliation() {
           <div className="dashboard-card action-needed-card">
             <div>
               <h2>{humanReview} transactions require human action</h2>
-              <p>Open the exceptions queue to approve, reject, or keep items as exceptions.</p>
+              <p>Open the AI Cases queue to approve, reject, or keep items as exceptions.</p>
             </div>
-            <button className="primary-button" onClick={() => navigate("/exceptions")}>
-              Review Exceptions
+            <button className="primary-button" onClick={() => navigate("/ai-cases")}>
+              Review AI Cases
             </button>
           </div>
         )}
 
         <div className="upload-button-row">
-          <Link className="secondary-button button-link" to="/">Dashboard</Link>
+          <Link className="secondary-button button-link" to="/dashboard">Dashboard</Link>
           <Link className="secondary-button button-link" to="/verification">Verification</Link>
-          <button className="secondary-button" onClick={() => { setResults(null); setValidation(null); }}>
-            Start another batch
-          </button>
         </div>
       </div>
     );
@@ -361,9 +359,9 @@ export default function NewReconciliation() {
         <div className="review-summary-grid">
           <div>
             <span>Bank Statement</span>
-            <strong>1 file</strong>
+            <strong>{bankFile ? "1 file" : "0 files"}</strong>
             <small>
-              {bankFile ? `${validation?.bank?.records ?? "—"} records · ${validation?.bank?.valid ? "Valid" : validation ? "Invalid" : "Not validated"}` : "No file"}
+              {bankFile ? `${validation?.bank?.records ?? "—"} records · ${validation?.bank?.valid ? "Valid" : validation ? "Invalid" : "Not validated"}` : "No file selected"}
             </small>
           </div>
           <div>

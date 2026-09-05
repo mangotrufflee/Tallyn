@@ -11,27 +11,24 @@ import {
 
 import KPICard from "../components/KPICard";
 import WorkflowProgress from "../components/WorkflowProgress";
-import { getSummary, getMetrics, getBenchmark } from "../services/api";
+import { getSummary, getMetrics } from "../services/api";
 import { hasGroundTruth } from "../utils/workflow";
 
 function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [metrics, setMetrics] = useState(null);
-  const [benchmark, setBenchmark] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [summaryData, metricsData, benchmarkData] = await Promise.all([
+        const [summaryData, metricsData] = await Promise.all([
           getSummary(),
           getMetrics(),
-          getBenchmark(),
         ]);
         setSummary(summaryData);
         setMetrics(metricsData);
-        setBenchmark(benchmarkData);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -73,6 +70,8 @@ function Dashboard() {
   const groundTruth = hasGroundTruth(metrics);
   const pending = (summary.review || 0) + (summary.exceptions || 0);
   const workflowStep = pending > 0 ? 4 : summary.total_transactions > 0 ? 5 : 1;
+  const aiRecommendationAccuracy = metrics?.ai_recommendation_accuracy;
+  const guardApprovalAccuracy = metrics?.guard_approval_accuracy;
 
   return (
     <div className="dashboard-page">
@@ -81,11 +80,11 @@ function Dashboard() {
           <span className="dashboard-eyebrow">FINANCE OPERATIONS CONTROL</span>
           <h1>Reconciliation Overview</h1>
           <p>
-            Current uploaded batch and the separate Track 04 evaluation. Quality scores are never shown as if they belong to a live batch without ground truth.
+            Current uploaded batch and its operational reconciliation quality.
           </p>
         </div>
-        <Link to="/new-reconciliation" className="primary-button button-link">
-          New Reconciliation
+        <Link to="/past-records" className="primary-button button-link">
+          Past Records
         </Link>
       </div>
 
@@ -170,49 +169,20 @@ function Dashboard() {
           <div className="card-header">
             <div>
               <h2>Current pipeline activity</h2>
-              <p>Operational counts from the live database, not Track 04.</p>
+              <p>Operational counts from the live database. Guard and AI accuracy are measured from approved recommendations.</p>
             </div>
           </div>
           <div className="performance-grid">
             <div className="performance-item"><span>AI Cases</span><strong>{metrics.ai_cases}</strong><small>Uncertain cases sent to AI</small></div>
             <div className="performance-item"><span>AI Recommendations</span><strong>{metrics.ai_recommendations}</strong><small>AI MATCH recommendations</small></div>
+            <div className="performance-item"><span>AI Accuracy</span><strong>{aiRecommendationAccuracy == null ? "—" : `${Number(aiRecommendationAccuracy).toFixed(2)}%`}</strong><small>Approved AI selection quality</small></div>
             <div className="performance-item"><span>Guard Approved</span><strong>{metrics.guard_approved}</strong><small>AI matches independently verified</small></div>
             <div className="performance-item"><span>Guard Rejected</span><strong>{metrics.ai_matches_blocked}</strong><small>Recommendations stopped</small></div>
-            <div className="performance-item"><span>Human Reviewed</span><strong>{metrics.human_reviewed ?? 0}</strong><small>Completed reviewer decisions</small></div>
+            <div className="performance-item"><span>Guard Accuracy</span><strong>{guardApprovalAccuracy == null ? "—" : `${Number(guardApprovalAccuracy).toFixed(2)}%`}</strong><small>Verified safe auto resolutions</small></div>
+            <div className="performance-item"><span>Human Reviewed</span><strong>{metrics.human_reviewed == null ? "—" : metrics.human_reviewed}</strong><small>Completed reviewer decisions</small></div>
             <div className="performance-item"><span>Still Unresolved</span><strong>{summary.review + summary.exceptions}</strong><small>Open review and exceptions</small></div>
           </div>
         </div>
-      </section>
-
-      <section className="dashboard-section-block benchmark-section">
-        <div className="section-kicker-row">
-          <div>
-            <span className="dashboard-eyebrow">TRACK 04 BENCHMARK</span>
-            <h2>Measured evaluation batch</h2>
-            <p>These figures come from the saved Track 04 result file. They are not the current upload.</p>
-          </div>
-          <span className="batch-badge">Track 04</span>
-        </div>
-
-        {benchmark?.available ? (
-          <div className="dashboard-card">
-            <div className="performance-grid">
-              <div className="performance-item"><span>Records</span><strong>{benchmark.records}</strong><small>Synthetic evaluation batch</small></div>
-              <div className="performance-item"><span>Match Rate</span><strong>{benchmark.match_rate.toFixed(2)}%</strong><small>Final automatic matches</small></div>
-              <div className="performance-item"><span>Accuracy</span><strong>{benchmark.accuracy.toFixed(2)}%</strong><small>Labeled Track 04 correctness</small></div>
-              <div className="performance-item"><span>Precision</span><strong>—</strong><small>Not returned by /benchmark</small></div>
-              <div className="performance-item"><span>Recall</span><strong>—</strong><small>Not returned by /benchmark</small></div>
-              <div className="performance-item"><span>F1</span><strong>—</strong><small>Not returned by /benchmark</small></div>
-              <div className="performance-item"><span>AI Processed</span><strong>{benchmark.ai_processed}</strong><small>Uncertain cases sent to AI</small></div>
-              <div className="performance-item"><span>Guard Verified</span><strong>{benchmark.guard_verified}</strong><small>AI matches independently verified</small></div>
-              <div className="performance-item"><span>Unsafe Auto Matches</span><strong>{benchmark.incorrect_automatic}</strong><small>Must remain zero</small></div>
-            </div>
-          </div>
-        ) : (
-          <div className="dashboard-card">
-            <p className="muted-note">Track 04 benchmark file is not available.</p>
-          </div>
-        )}
       </section>
 
       <div className="dashboard-card pipeline-card">

@@ -54,7 +54,7 @@ export default function Exceptions() {
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h1>Exceptions</h1>
+          <h1>AI Cases</h1>
           <p>Actionable queue of transactions that still need a human decision.</p>
         </div>
         <div className="exception-count">{exceptions.length} Open</div>
@@ -62,7 +62,7 @@ export default function Exceptions() {
 
       <WorkflowProgress
         currentStep={exceptions.length ? 4 : 5}
-        hint={exceptions.length ? "Open an item to review evidence and decide." : "No open exceptions."}
+        hint={exceptions.length ? "Open an item to review evidence and decide." : "No open AI cases."}
       />
 
       <div className="exception-summary">
@@ -90,12 +90,12 @@ export default function Exceptions() {
 
         {exceptions.length === 0 ? (
           <div className="empty-state">
-            <h2>No exceptions</h2>
+            <h2>No AI cases</h2>
             <p>All transactions have been resolved.</p>
           </div>
         ) : (
-          <div className="table-wrapper">
-            <table className="transaction-table">
+          <div className="table-wrapper ai-cases-table-wrapper">
+            <table className="transaction-table ai-cases-table">
               <thead>
                 <tr>
                   <th>Type</th>
@@ -117,13 +117,13 @@ export default function Exceptions() {
                         <span className="invoice-subtext">{transaction.counterparty || "—"}</span>
                       </td>
                       <td><strong>{formatAmount(transaction)}</strong></td>
-                      <td className="reason-cell">
+                      <td className="reason-cell ai-case-reason">
                         {transaction.verification_reason || transaction.reason || "Requires manual verification"}
                       </td>
                       <td>
                         <span className={`status-badge status-${status.toLowerCase()}`}>{status}</span>
                       </td>
-                      <td>
+                      <td className="ai-case-actions">
                         <Link
                           to={`/verification?transactionId=${encodeURIComponent(transaction.transaction_id)}`}
                           className="view-link"

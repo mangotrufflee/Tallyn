@@ -1,28 +1,21 @@
-function Topbar() {
+import { Link } from "react-router-dom";
+
+function Topbar({ compact = false }) {
   return (
-    <header className="topbar">
-
-      <div>
-        <h1>Reconciliation Overview</h1>
-
-        <p>
-          Monitor your finance reconciliation pipeline
-        </p>
+    <header className={`topbar ${compact ? "topbar-compact" : ""}`}>
+      <div className="brand-wrap">
+        <div className="brand-icon">T</div>
+        <div>
+          <h1>Tallyn</h1>
+          <p>Finance Control</p>
+        </div>
       </div>
 
       <div className="topbar-right">
-
-        <div className="live-indicator">
-          <span></span>
-          Live
-        </div>
-
-        <div className="avatar">
-          AC
-        </div>
-
+        <Link to="/new-reconciliation" className="primary-button button-link">
+          New Reconciliation
+        </Link>
       </div>
-
     </header>
   );
 }
