@@ -119,25 +119,151 @@ def _first_settlement_reference(row, fields):
     return ""
 
 
+# Cross-system reference fields (NOT transaction_id).
+# transaction_id identifies the bank row; it is not assumed to be
+# an ERP reference, invoice, UTR, or settlement id.
+BANK_CROSS_REFERENCE_FIELDS = (
+    "utr",
+    "UTR",
+    "bank_utr",
+    "bank_reference",
+    "settlement_reference",
+    "reference",
+    "invoice_reference",
+    "invoice_id",
+)
+
+ERP_CROSS_REFERENCE_FIELDS = (
+    "settlement_reference",
+    "settlement_utr",
+    "reference",
+    "invoice_id",
+)
+
+BANK_SETTLEMENT_REFERENCE_FIELDS = (
+    "settlement_reference",
+    "bank_utr",
+    "utr",
+    "UTR",
+    "bank_reference",
+    "reference",
+    "description",
+)
+
+ERP_SETTLEMENT_REFERENCE_FIELDS = (
+    "settlement_reference",
+    "settlement_utr",
+    "reference",
+)
+
+
+def _row_get(row, field):
+    if row is None:
+        return None
+    if hasattr(row, "get"):
+        return row.get(field)
+    try:
+        return row[field]
+    except Exception:
+        return None
+
+
+def collect_cross_references(row, fields):
+    """Collect normalized cross-system reference values from a row."""
+
+    values = []
+    seen = set()
+
+    for field in fields:
+        normalized = normalize_settlement_reference(
+            _row_get(row, field)
+        )
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            values.append(normalized)
+
+    return values
+
+
+def _best_reference_pair_score(bank_refs, erp_refs):
+    """Exact and fuzzy similarity between cross-system reference sets."""
+
+    if not bank_refs or not erp_refs:
+        return 0
+
+    best = 0
+
+    for bank_ref in bank_refs:
+        for erp_ref in erp_refs:
+            if bank_ref == erp_ref:
+                return 100
+
+            if bank_ref in erp_ref or erp_ref in bank_ref:
+                best = max(best, 90)
+                continue
+
+            best = max(best, ratio(bank_ref, erp_ref))
+
+    return int(best) if best >= 90 else 0
+
+
+def cross_reference_similarity(bank_row, erp_row):
+    """
+    Score genuine cross-system references.
+
+    Compares UTR / bank reference / settlement / invoice refs
+    against ERP reference / settlement / invoice fields.
+    Does not use transaction_id.
+    """
+
+    return _best_reference_pair_score(
+        collect_cross_references(
+            bank_row,
+            BANK_CROSS_REFERENCE_FIELDS,
+        ),
+        collect_cross_references(
+            erp_row,
+            ERP_CROSS_REFERENCE_FIELDS,
+        ),
+    )
+
+
+def transaction_id_coincidence_score(bank_row, erp_row):
+    """
+    Optional evidence only: if a bank transaction_id happens to
+    equal an ERP cross-system reference, count it.
+
+    This preserves legitimate synthetic/demo links without making
+    transaction_id a universal matching requirement.
+    """
+
+    bank_id = normalize_settlement_reference(
+        _row_get(bank_row, "transaction_id")
+    )
+    if not bank_id:
+        return 0
+
+    erp_refs = collect_cross_references(
+        erp_row,
+        ERP_CROSS_REFERENCE_FIELDS,
+    )
+
+    if bank_id in erp_refs:
+        return 100
+
+    return 0
+
+
 def settlement_reference_similarity(bank_row, erp_row):
-    """Return 100 when bank and Razorpay settlement references match."""
+    """Return 100 when bank and ERP settlement/UTR references match."""
 
     bank_reference = _first_settlement_reference(
         bank_row,
-        [
-            "settlement_reference",
-            "bank_utr",
-            "bank_reference",
-            "reference",
-            "description",
-        ],
+        BANK_SETTLEMENT_REFERENCE_FIELDS,
     )
     erp_reference = _first_settlement_reference(
         erp_row,
-        [
-            "settlement_reference",
-            "settlement_utr",
-        ],
+        ERP_SETTLEMENT_REFERENCE_FIELDS,
     )
 
     if bank_reference and bank_reference == erp_reference:
@@ -145,24 +271,27 @@ def settlement_reference_similarity(bank_row, erp_row):
 
     return 0
 
+
 def reference_similarity(bank_row, erp_row):
     """
-    Check whether the ERP reference directly matches
-    the bank transaction ID.
+    Cross-system reference similarity.
+
+    Priority:
+      1) genuine UTR / settlement / invoice / reference links
+      2) optional transaction_id coincidence with an ERP reference
     """
 
-    bank_id = str(
-        bank_row["transaction_id"]
-    ).strip().lower()
+    cross_score = cross_reference_similarity(
+        bank_row,
+        erp_row,
+    )
+    if cross_score:
+        return cross_score
 
-    erp_reference = str(
-        erp_row["reference"]
-    ).strip().lower()
-
-    if bank_id == erp_reference:
-        return 100
-
-    return 0
+    return transaction_id_coincidence_score(
+        bank_row,
+        erp_row,
+    )
 
 
 def calculate_match_score(bank_row, erp_row):
@@ -205,6 +334,11 @@ def calculate_match_score(bank_row, erp_row):
         == erp_row["date"]
     )
 
+    amount_difference = abs(
+        bank_row["amount"]
+        - erp_row["amount"]
+    )
+
     # Base score
     final_score = (
         amount_score * 0.40
@@ -220,18 +354,19 @@ def calculate_match_score(bank_row, erp_row):
     if exact_amount and vendor_score >= 70:
         final_score += 5
 
-    # Direct reference match is extremely strong evidence
-    if reference_score == 100:
+    # Exact cross-system reference is strong only with amount consistency.
+    # Do not auto-approve material amount conflicts.
+    if reference_score == 100 and amount_difference == 0:
         final_score = 100
 
     if settlement_reference_score == 100:
-        amount_difference = abs(
-            bank_row["amount"]
-            - erp_row["amount"]
-        )
-
-        if amount_difference <= 500:
+        if amount_difference == 0:
             final_score = 100
+        elif amount_difference <= 500:
+            # Preserve prior settlement tolerance, but never above
+            # a safe ceiling when amount is imperfect.
+            final_score = max(final_score, 85)
+            final_score = min(final_score, 89)
 
     final_score = min(
         final_score,

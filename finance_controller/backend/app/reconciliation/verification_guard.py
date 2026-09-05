@@ -1,6 +1,14 @@
 import pandas as pd
 
-from .matcher import vendor_similarity
+from .matcher import (
+    vendor_similarity,
+    collect_cross_references,
+    BANK_CROSS_REFERENCE_FIELDS,
+    ERP_CROSS_REFERENCE_FIELDS,
+    settlement_reference_similarity,
+    transaction_id_coincidence_score,
+    cross_reference_similarity,
+)
 
 
 def _safe_float(value):
@@ -368,18 +376,6 @@ def verify_ai_match(
 
     checks["candidate_exists"] = True
 
-    bank_id = str(
-        bank_row["transaction_id"]
-    ).strip().lower()
-
-    erp_reference = str(
-        erp_row["reference"]
-    ).strip().lower()
-
-    checks["reference_matches"] = (
-        bank_id == erp_reference
-    )
-
     bank_amount = float(
         bank_row["amount"]
     )
@@ -398,6 +394,10 @@ def verify_ai_match(
 
     checks["amount_matches"] = (
         amount_difference == 0
+    )
+
+    checks["material_amount_conflict"] = (
+        amount_difference > 500
     )
 
     bank_date = pd.to_datetime(
@@ -420,6 +420,10 @@ def verify_ai_match(
         date_difference == 0
     )
 
+    checks["material_date_conflict"] = (
+        date_difference > 3
+    )
+
     vendor_score = vendor_similarity(
         bank_row["counterparty"],
         erp_row["vendor"],
@@ -429,22 +433,113 @@ def verify_ai_match(
         vendor_score
     )
 
+    bank_refs = collect_cross_references(
+        bank_row,
+        BANK_CROSS_REFERENCE_FIELDS,
+    )
+    erp_refs = collect_cross_references(
+        erp_row,
+        ERP_CROSS_REFERENCE_FIELDS,
+    )
+
+    cross_score = cross_reference_similarity(
+        bank_row,
+        erp_row,
+    )
+    coincidence_score = (
+        transaction_id_coincidence_score(
+            bank_row,
+            erp_row,
+        )
+    )
+    settlement_score = (
+        settlement_reference_similarity(
+            bank_row,
+            erp_row,
+        )
+    )
+
+    reference_available = bool(bank_refs) and bool(
+        erp_refs
+    )
+
+    # Coincidence (txn id equals an ERP ref) is additional
+    # optional evidence, not a universal requirement.
+    if coincidence_score == 100 and not bank_refs:
+        reference_available = True
+
+    checks["reference_available"] = (
+        reference_available
+        or settlement_score == 100
+        or coincidence_score == 100
+    )
+
+    if cross_score == 100 or settlement_score == 100:
+        checks["reference_status"] = "matched"
+        checks["reference_matches"] = True
+        checks["reference_conflict"] = False
+    elif coincidence_score == 100:
+        checks["reference_status"] = "matched"
+        checks["reference_matches"] = True
+        checks["reference_conflict"] = False
+    elif reference_available and cross_score == 0:
+        # Both sides provided refs that do not agree.
+        checks["reference_status"] = "conflict"
+        checks["reference_matches"] = False
+        checks["reference_conflict"] = True
+    else:
+        checks["reference_status"] = "unavailable"
+        checks["reference_matches"] = None
+        checks["reference_conflict"] = False
+
+    checks["settlement_reference_matches"] = (
+        settlement_score == 100
+    )
+    checks["transaction_id_coincidence"] = (
+        coincidence_score == 100
+    )
+    checks["cross_reference_score"] = cross_score
+
     return checks
 
 
 def get_final_decision(checks):
 
-    if not checks["candidate_exists"]:
+    if not checks.get("candidate_exists"):
         return "EXCEPTION"
 
-    strong_match = (
-        checks["reference_matches"]
-        and checks["amount_matches"]
-        and checks["date_matches"]
-        and checks["vendor_similarity"] >= 70
+    if checks.get("material_amount_conflict"):
+        return "REVIEW"
+
+    if checks.get("material_date_conflict"):
+        return "REVIEW"
+
+    if checks.get("reference_conflict"):
+        return "REVIEW"
+
+    amount_ok = checks.get("amount_matches") is True
+    date_ok = checks.get("date_matches") is True
+    vendor_ok = (
+        checks.get("vendor_similarity", 0) >= 70
     )
 
-    if strong_match:
+    reference_ok = (
+        checks.get("reference_matches") is True
+        or checks.get("settlement_reference_matches")
+        is True
+    )
+
+    # Automatic MATCHED requires amount + date + vendor
+    # consistency AND a confirmed cross-system reference
+    # (UTR/settlement/invoice/reference), including optional
+    # transaction_id coincidence when it truly equals an ERP ref.
+    # Missing reference evidence is REVIEW, not a mismatch label.
+    if (
+        amount_ok
+        and date_ok
+        and vendor_ok
+        and reference_ok
+    ):
         return "MATCHED"
 
     return "REVIEW"

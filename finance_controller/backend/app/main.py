@@ -1,6 +1,7 @@
 from pathlib import Path
 from io import BytesIO
 import json
+from typing import List, Optional, Tuple
 
 import pandas as pd
 
@@ -39,8 +40,8 @@ from backend.app.reconciliation.matcher import (
 
 from backend.app.ai.ai_reasoner import (
     build_ai_prompt,
-    ask_ai,
     validate_ai_response,
+    safe_ask_ai,
 )
 
 
@@ -120,63 +121,73 @@ REQUIRED_ERP_COLUMNS = {
 }
 
 
-async def read_uploaded_records(upload: UploadFile, required_columns):
-    filename = upload.filename or ""
-    suffix = Path(filename).suffix.lower()
-    if suffix not in {".csv", ".xlsx", ".xls"}:
-        return None, {
-            "filename": filename,
-            "valid": False,
-            "errors": ["Supported formats are CSV, XLSX, and XLS."],
-        }
-
+async def _read_upload_bytes(upload: UploadFile) -> Tuple[bytes, str]:
     contents = await upload.read()
-    try:
-        if suffix == ".csv":
-            frame = pd.read_csv(BytesIO(contents))
-        else:
-            frame = pd.read_excel(BytesIO(contents))
-    except Exception as exc:
-        return None, {
-            "filename": filename,
-            "valid": False,
-            "errors": [f"File could not be read: {exc}"],
-        }
+    filename = upload.filename or "upload"
+    return contents, filename
 
-    errors = []
-    missing = sorted(required_columns - set(frame.columns))
-    if missing:
-        errors.append(f"Missing required columns: {', '.join(missing)}")
-    if frame.empty:
-        errors.append("The file contains no records.")
-    if "amount" in frame:
-        amounts = pd.to_numeric(frame["amount"], errors="coerce")
-        invalid_amounts = amounts.isna().sum()
-        if invalid_amounts:
-            errors.append(f"{invalid_amounts} amount value(s) are not numeric.")
-    if "date" in frame:
-        dates = pd.to_datetime(frame["date"], errors="coerce")
-        invalid_dates = dates.isna().sum()
-        if invalid_dates:
-            errors.append(f"{invalid_dates} date value(s) are not parseable.")
-    for column in required_columns & set(frame.columns):
-        if frame[column].isna().any() or frame[column].astype("string").str.strip().eq("").any():
-            errors.append(f"Column '{column}' contains blank required values.")
 
-    identifier = "transaction_id" if "transaction_id" in frame else "invoice_id"
-    if identifier in frame and frame[identifier].duplicated().any():
-        duplicate_count = int(frame[identifier].duplicated().sum())
-        errors.append(
-            f"{duplicate_count} duplicate {identifier} value(s) found."
-        )
+async def read_uploaded_records(upload: UploadFile, required_columns):
+    """
+    Backward-compatible upload reader.
 
-    return frame, {
-        "filename": filename,
-        "records": len(frame),
-        "columns": [str(column) for column in frame.columns],
-        "valid": not errors,
-        "errors": errors,
+    Uses the ingestion pipeline (alias normalization, PDF, validation)
+    and returns canonical frames for the existing reconciliation engine.
+    """
+    from backend.app.ingestion.pipeline import ingest_file
+
+    contents, filename = await _read_upload_bytes(upload)
+
+    # Infer role from the historical required-column contract.
+    if "transaction_id" in required_columns:
+        hinted_role = "bank"
+    else:
+        hinted_role = "supporting"
+
+    frame, info = ingest_file(
+        contents,
+        filename,
+        hinted_role=hinted_role,
+    )
+
+    # Preserve legacy keys expected by the frontend.
+    legacy = {
+        "filename": info.get("filename"),
+        "records": info.get("records", 0),
+        "columns": info.get("columns") or info.get("detected_fields") or [],
+        "valid": info.get("valid", False),
+        "errors": list(info.get("errors") or []),
+        "warnings": list(info.get("warnings") or []),
+        "source_type": info.get("source_type"),
+        "status": info.get("status"),
+        "detected_fields": info.get("detected_fields") or [],
     }
+    return frame, legacy
+
+
+async def read_supporting_uploads(uploads):
+    """Normalize one or more supporting documents independently."""
+    from backend.app.ingestion.pipeline import ingest_supporting_files
+
+    files = []
+    for upload in uploads:
+        contents, filename = await _read_upload_bytes(upload)
+        files.append((contents, filename))
+
+    combined, file_infos, summary = ingest_supporting_files(files)
+    legacy = {
+        "filename": summary.get("filename"),
+        "records": summary.get("records", 0),
+        "columns": summary.get("columns") or [],
+        "valid": summary.get("valid", False),
+        "errors": list(summary.get("errors") or []),
+        "warnings": list(summary.get("warnings") or []),
+        "source_type": summary.get("source_type"),
+        "status": summary.get("status"),
+        "detected_fields": summary.get("detected_fields") or [],
+        "files": file_infos,
+    }
+    return combined, legacy
 
 
 # ============================================================
@@ -193,154 +204,131 @@ def run_ai_on_transaction(
         erp,
         top_n=5
     )
+    # Note: enrich_candidates_with_source_rows is called inside
+    # build_ai_prompt — do not call it again here to avoid double-enrichment.
 
+    allowed_ids = [
+        candidate.get("invoice_id")
+        for candidate in candidates
+        if candidate.get("invoice_id") not in (None, "")
+    ]
+
+    # No candidates → EXCEPTION without calling the model.
+    if len(candidates) == 0:
+        return {
+            "ai_decision": "EXCEPTION",
+            "ai_invoice": None,
+            "ai_confidence": 0,
+            "ai_reason": "No ERP candidates available",
+            "ai_risk": "HIGH",
+            "verification_decision": "EXCEPTION",
+            "verification_reason": "No ERP candidates available",
+            "verification_checks": None,
+        }
 
     prompt = build_ai_prompt(
         bank_row,
-        candidates
+        candidates,
+        erp=erp,
     )
 
-
-    raw_response = ask_ai(
-        prompt
-    )
-
+    ai_call = safe_ask_ai(prompt)
+    if not ai_call["ok"]:
+        return {
+            "ai_decision": "REVIEW",
+            "ai_invoice": None,
+            "ai_confidence": 0,
+            "ai_reason": ai_call["error"],
+            "ai_risk": "HIGH",
+            "verification_decision": "REVIEW",
+            "verification_reason": "AI unavailable or failed",
+            "verification_checks": None,
+        }
 
     validation = validate_ai_response(
-        raw_response
+        ai_call["raw"],
+        allowed_invoice_ids=allowed_ids,
     )
 
-
-    # --------------------------------------------------------
-    # Invalid AI response
-    # --------------------------------------------------------
-
+    # Invalid / hallucinated AI output → REVIEW (never auto MATCH).
     if not validation["valid"]:
-
         return {
-
-            "ai_decision": "EXCEPTION",
-
+            "ai_decision": "REVIEW",
             "ai_invoice": None,
-
             "ai_confidence": 0,
-
             "ai_reason": validation["error"],
-
             "ai_risk": "HIGH",
-
-            "verification_decision": "EXCEPTION",
-
-            "verification_reason":
-                "Invalid AI response",
-
+            "verification_decision": "REVIEW",
+            "verification_reason": (
+                "Invalid or unsafe AI response: "
+                f"{validation['error']}"
+            ),
             "verification_checks": None,
         }
-
 
     result = validation["result"]
-
-
     ai_decision = result["decision"]
-
     ai_invoice = result["selected_invoice"]
 
-
-    # --------------------------------------------------------
-    # AI did not select invoice
-    # --------------------------------------------------------
-
     if not ai_invoice:
-
-        if len(candidates) == 0:
-
-            verification_decision = "EXCEPTION"
-
-            verification_reason = (
-                "No ERP candidates available"
-            )
-
-        else:
-
-            verification_decision = "REVIEW"
-
-            verification_reason = (
-                "AI could not confidently select "
-                "a candidate"
-            )
-
-
+        verification_decision = (
+            "EXCEPTION"
+            if ai_decision == "EXCEPTION"
+            else "REVIEW"
+        )
+        verification_reason = (
+            "AI could not confidently select a candidate"
+            if verification_decision == "REVIEW"
+            else "AI marked the case as EXCEPTION"
+        )
         return {
-
             "ai_decision": ai_decision,
-
             "ai_invoice": None,
-
-            "ai_confidence":
-                result["confidence"],
-
-            "ai_reason":
-                result["reason"],
-
-            "ai_risk":
-                result["risk"],
-
-            "verification_decision":
-                verification_decision,
-
-            "verification_reason":
-                verification_reason,
-
+            "ai_confidence": result["confidence"],
+            "ai_reason": result["reason"],
+            "ai_risk": result["risk"],
+            "verification_decision": verification_decision,
+            "verification_reason": verification_reason,
             "verification_checks": None,
         }
 
-
-    # --------------------------------------------------------
-    # Verify candidate
-    # --------------------------------------------------------
-
-    candidate_is_valid = verify_selected_candidate(
+    selection = verify_selected_candidate(
         ai_invoice,
-        candidates
+        candidates,
     )
-
-
-    if not candidate_is_valid:
-
+    selection_decision = (
+        selection.get("decision")
+        if isinstance(selection, dict)
+        else None
+    )
+    if selection_decision == "EXCEPTION":
         return {
-
-            "ai_decision": ai_decision,
-
+            "ai_decision": "REVIEW",
             "ai_invoice": ai_invoice,
-
-            "ai_confidence":
-                result["confidence"],
-
-            "ai_reason":
-                result["reason"],
-
+            "ai_confidence": result["confidence"],
+            "ai_reason": result["reason"],
             "ai_risk": "HIGH",
-
-            "verification_decision":
-                "EXCEPTION",
-
-            "verification_reason":
-                (
-                    "AI selected an invoice outside "
-                    "the candidate set"
-                ),
-
+            "verification_decision": "REVIEW",
+            "verification_reason": selection.get(
+                "reason",
+                "AI selected an invoice outside the candidate set",
+            ),
             "verification_checks": None,
         }
 
-
-    # --------------------------------------------------------
-    # Find selected ERP record
-    # --------------------------------------------------------
+    if selection_decision == "REVIEW" and selection.get("exception_type") == "DUPLICATE_SETTLEMENT":
+        return {
+            "ai_decision": ai_decision,
+            "ai_invoice": ai_invoice,
+            "ai_confidence": result["confidence"],
+            "ai_reason": result["reason"],
+            "ai_risk": result["risk"],
+            "verification_decision": "REVIEW",
+            "verification_reason": selection.get("reason"),
+            "verification_checks": None,
+        }
 
     selected_erp = None
-
-
     matches = erp[
         erp["invoice_id"]
         .astype(str)
@@ -348,53 +336,26 @@ def run_ai_on_transaction(
         ==
         str(ai_invoice).strip()
     ]
-
-
     if not matches.empty:
-
         selected_erp = matches.iloc[0]
-
-
-    # --------------------------------------------------------
-    # Independent verification
-    # --------------------------------------------------------
 
     verification_checks = verify_ai_match(
         bank_row,
-        selected_erp
+        selected_erp,
     )
-
-
     verification_decision = get_final_decision(
-        verification_checks
+        verification_checks,
     )
-
 
     return {
-
-        "ai_decision":
-            ai_decision,
-
-        "ai_invoice":
-            ai_invoice,
-
-        "ai_confidence":
-            result["confidence"],
-
-        "ai_reason":
-            result["reason"],
-
-        "ai_risk":
-            result["risk"],
-
-        "verification_decision":
-            verification_decision,
-
-        "verification_reason":
-            None,
-
-        "verification_checks":
-            str(verification_checks),
+        "ai_decision": ai_decision,
+        "ai_invoice": ai_invoice,
+        "ai_confidence": result["confidence"],
+        "ai_reason": result["reason"],
+        "ai_risk": result["risk"],
+        "verification_decision": verification_decision,
+        "verification_reason": None,
+        "verification_checks": str(verification_checks),
     }
 
 
@@ -1566,16 +1527,37 @@ def review_transaction(
 @app.post("/reconcile/validate")
 async def validate_reconciliation_upload(
     bank_file: UploadFile = File(...),
-    erp_file: UploadFile = File(...),
+    erp_file: Optional[UploadFile] = File(None),
+    supporting_files: Optional[List[UploadFile]] = File(None),
 ):
     _, bank_info = await read_uploaded_records(
         bank_file,
         REQUIRED_BANK_COLUMNS,
     )
-    _, erp_info = await read_uploaded_records(
-        erp_file,
-        REQUIRED_ERP_COLUMNS,
-    )
+
+    uploads = []
+    if supporting_files:
+        uploads.extend([item for item in supporting_files if item is not None])
+    if erp_file is not None:
+        uploads.append(erp_file)
+
+    if not uploads:
+        erp_info = {
+            "filename": "",
+            "records": 0,
+            "columns": [],
+            "valid": False,
+            "errors": ["Upload at least one supporting document."],
+            "warnings": [],
+        }
+    elif len(uploads) == 1:
+        _, erp_info = await read_uploaded_records(
+            uploads[0],
+            REQUIRED_ERP_COLUMNS,
+        )
+    else:
+        _, erp_info = await read_supporting_uploads(uploads)
+
     return {
         "valid": bank_info["valid"] and erp_info["valid"],
         "bank": bank_info,
@@ -1586,16 +1568,38 @@ async def validate_reconciliation_upload(
 @app.post("/reconcile/upload")
 async def reconcile_uploaded_batch(
     bank_file: UploadFile = File(...),
-    erp_file: UploadFile = File(...),
+    erp_file: Optional[UploadFile] = File(None),
+    supporting_files: Optional[List[UploadFile]] = File(None),
 ):
     bank, bank_info = await read_uploaded_records(
         bank_file,
         REQUIRED_BANK_COLUMNS,
     )
-    erp, erp_info = await read_uploaded_records(
-        erp_file,
-        REQUIRED_ERP_COLUMNS,
-    )
+
+    uploads = []
+    if supporting_files:
+        uploads.extend([item for item in supporting_files if item is not None])
+    if erp_file is not None:
+        uploads.append(erp_file)
+
+    if not uploads:
+        erp = None
+        erp_info = {
+            "filename": "",
+            "records": 0,
+            "columns": [],
+            "valid": False,
+            "errors": ["Upload at least one supporting document."],
+            "warnings": [],
+        }
+    elif len(uploads) == 1:
+        erp, erp_info = await read_uploaded_records(
+            uploads[0],
+            REQUIRED_ERP_COLUMNS,
+        )
+    else:
+        erp, erp_info = await read_supporting_uploads(uploads)
+
     if (
         not bank_info["valid"]
         or not erp_info["valid"]
@@ -1606,11 +1610,6 @@ async def reconcile_uploaded_batch(
             status_code=422,
             detail={"bank": bank_info, "erp": erp_info},
         )
-
-    bank["date"] = pd.to_datetime(bank["date"])
-    erp["date"] = pd.to_datetime(erp["date"])
-    bank["amount"] = pd.to_numeric(bank["amount"])
-    erp["amount"] = pd.to_numeric(erp["amount"])
 
     initialize_database()
     replace_active_batch(bank, erp)

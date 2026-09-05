@@ -223,3 +223,23 @@ def extract_bank_pdf(pdf_path):
     Public entry point used by the application.
     """
     return prepare_bank_pdf_dataframe(pdf_path)
+
+
+def extract_bank_pdf_bytes(contents: bytes):
+    """
+    Extract a bank statement table from in-memory PDF bytes.
+    Uses the existing extract_bank_pdf path via a temporary file.
+    """
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as handle:
+        handle.write(contents)
+        temp_path = handle.name
+    try:
+        return extract_bank_pdf(temp_path)
+    finally:
+        try:
+            Path(temp_path).unlink()
+        except OSError:
+            pass

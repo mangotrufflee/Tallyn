@@ -1,0 +1,9 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/finance_controller/.venv/Scripts/python.exe",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/finance_controller"
+    ],
+    "python.autoComplete.extraPaths": [
+        "${workspaceFolder}/finance_controller"
+    ]
+}

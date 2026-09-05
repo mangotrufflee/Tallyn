@@ -1,7 +1,7 @@
 """
 Source normalization layer.
 
-Converts heterogeneous bank / Razorpay source fields into
+Converts heterogeneous bank / ERP / Razorpay source fields into
 canonical internal fields consumed by the reconciliation engine.
 
 Important:
@@ -13,7 +13,7 @@ Important:
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
@@ -152,14 +152,40 @@ def _get_value(
     return _clean_value(row[column])
 
 
+def _has_any_column(columns: Iterable[Any], aliases: Iterable[str]) -> bool:
+    return _find_column(columns, aliases) is not None
+
+
+def _original_payload(row: pd.Series) -> Dict[str, Any]:
+    return {
+        str(key): _clean_value(value)
+        for key, value in row.to_dict().items()
+    }
+
+
 # ============================================================
 # Bank statement aliases
 # ============================================================
+
+BANK_TRANSACTION_ID_ALIASES = [
+    "transaction_id",
+    "transaction id",
+    "txn_id",
+    "txn id",
+    "txnid",
+    "transaction reference",
+    "txn reference",
+    "transaction no",
+    "transaction number",
+    "txn no",
+]
 
 BANK_DATE_ALIASES = [
     "date",
     "transaction date",
     "transaction_date",
+    "txn date",
+    "txn_date",
     "tran date",
     "tran_date",
     "posting date",
@@ -182,6 +208,18 @@ BANK_NARRATION_ALIASES = [
     "particulars",
 ]
 
+BANK_COUNTERPARTY_ALIASES = [
+    "counterparty",
+    "vendor",
+    "merchant",
+    "payee",
+    "beneficiary",
+    "party name",
+    "party",
+    "customer",
+    "customer name",
+]
+
 BANK_REFERENCE_ALIASES = [
     "cheque / ref no.",
     "cheque / ref no",
@@ -191,13 +229,29 @@ BANK_REFERENCE_ALIASES = [
     "cheque no",
     "chq no",
     "reference",
+    "ref",
     "reference number",
     "ref no",
     "ref no.",
+    "bank reference",
+    "transaction reference",
     "utr",
     "utr number",
     "bank utr",
-    "bank reference",
+]
+
+BANK_UTR_ALIASES = [
+    "utr",
+    "utr number",
+    "bank utr",
+    "bank_utr",
+]
+
+BANK_SETTLEMENT_REFERENCE_ALIASES = [
+    "settlement reference",
+    "settlement_reference",
+    "settlement utr",
+    "settlement_utr",
 ]
 
 BANK_DEBIT_ALIASES = [
@@ -225,6 +279,66 @@ BANK_CREDIT_ALIASES = [
 BANK_AMOUNT_ALIASES = [
     "amount",
     "transaction amount",
+    "value",
+    "txn amount",
+]
+
+
+# ============================================================
+# ERP / invoice aliases
+# ============================================================
+
+ERP_INVOICE_ALIASES = [
+    "invoice_id",
+    "invoice id",
+    "invoice",
+    "invoice number",
+    "invoice no",
+    "invoice no.",
+    "bill number",
+    "bill no",
+    "bill_id",
+]
+
+ERP_DATE_ALIASES = [
+    "date",
+    "invoice date",
+    "invoice_date",
+    "bill date",
+    "document date",
+    "posting date",
+]
+
+ERP_AMOUNT_ALIASES = [
+    "amount",
+    "invoice amount",
+    "bill amount",
+    "value",
+    "total",
+    "net amount",
+]
+
+ERP_VENDOR_ALIASES = [
+    "vendor",
+    "supplier",
+    "merchant",
+    "counterparty",
+    "party",
+    "party name",
+    "vendor name",
+    "supplier name",
+]
+
+ERP_REFERENCE_ALIASES = [
+    "reference",
+    "ref",
+    "payment reference",
+    "payment_reference",
+    "transaction reference",
+    "txn reference",
+    "utr",
+    "utr number",
+    "bank reference",
 ]
 
 
@@ -294,93 +408,258 @@ RAZORPAY_STATUS_ALIASES = [
     "status",
 ]
 
+RAZORPAY_DETECT_ALIASES = (
+    RAZORPAY_SETTLEMENT_ID_ALIASES
+    + ["settlement utr", "settlement_utr", "gross payments", "gross amount"]
+)
+
+
+# ============================================================
+# Source detection
+# ============================================================
+
+def detect_source_type(
+    df: pd.DataFrame,
+    filename: str = "",
+    hinted_role: Optional[str] = None,
+) -> str:
+    """
+    Detect BANK / ERP / RAZORPAY / INVOICE / OTHER from columns + filename.
+
+    hinted_role: optional 'bank' or 'supporting' from the upload API.
+    """
+    name = (filename or "").lower()
+    columns = list(df.columns)
+
+    razorpay_hits = sum(
+        1 for alias in RAZORPAY_DETECT_ALIASES
+        if _has_any_column(columns, [alias])
+    )
+    bank_statement_shape = (
+        _has_any_column(columns, BANK_DEBIT_ALIASES)
+        or _has_any_column(columns, BANK_CREDIT_ALIASES)
+        or _has_any_column(columns, BANK_NARRATION_ALIASES)
+    )
+    has_txn_id = _has_any_column(columns, BANK_TRANSACTION_ID_ALIASES)
+    has_invoice = _has_any_column(columns, ERP_INVOICE_ALIASES)
+    has_vendor = _has_any_column(columns, ERP_VENDOR_ALIASES)
+    has_counterparty = _has_any_column(columns, BANK_COUNTERPARTY_ALIASES)
+
+    if "razorpay" in name or "settlement" in name or razorpay_hits >= 2:
+        return "RAZORPAY"
+
+    if "invoice" in name and has_invoice:
+        return "INVOICE"
+
+    if hinted_role == "bank":
+        return "BANK"
+
+    if has_invoice and (has_vendor or _has_any_column(columns, ERP_REFERENCE_ALIASES)):
+        if "invoice" in name:
+            return "INVOICE"
+        return "ERP"
+
+    if hinted_role == "supporting":
+        if has_invoice:
+            return "INVOICE" if "invoice" in name else "ERP"
+        if bank_statement_shape:
+            return "BANK"
+        return "OTHER"
+
+    if has_txn_id and (has_counterparty or bank_statement_shape):
+        return "BANK"
+
+    if bank_statement_shape and not has_invoice:
+        return "BANK"
+
+    if has_invoice:
+        return "ERP"
+
+    return "OTHER"
+
+
+def detected_fields(df: pd.DataFrame) -> List[str]:
+    return [str(column) for column in df.columns]
+
 
 # ============================================================
 # Bank normalization
 # ============================================================
 
-def normalize_bank_row(row: pd.Series) -> Dict[str, Any]:
+def _derive_bank_amount(
+    row: pd.Series,
+) -> Tuple[Optional[float], Optional[str], Optional[str]]:
+    """
+    Derive canonical amount/direction.
+
+    Returns (amount, direction, fatal_error_or_none).
+    """
+    debit = _parse_amount(_get_value(row, BANK_DEBIT_ALIASES))
+    credit = _parse_amount(_get_value(row, BANK_CREDIT_ALIASES))
+    amount = _parse_amount(_get_value(row, BANK_AMOUNT_ALIASES))
+
+    debit_present = debit is not None and debit != 0
+    credit_present = credit is not None and credit != 0
+
+    has_debit_col = _has_any_column(row.index, BANK_DEBIT_ALIASES)
+    has_credit_col = _has_any_column(row.index, BANK_CREDIT_ALIASES)
+
+    if has_debit_col and has_credit_col:
+        if debit_present and credit_present:
+            return None, None, "ambiguous debit/credit values on the same row"
+        if credit_present:
+            return abs(credit), "CREDIT", None
+        if debit_present:
+            return abs(debit), "DEBIT", None
+        if amount is not None:
+            return abs(amount), None, None
+        return None, None, None
+
+    if credit_present:
+        return abs(credit), "CREDIT", None
+    if debit_present:
+        return abs(debit), "DEBIT", None
+    if amount is not None:
+        return abs(amount), None, None
+    return None, None, None
+
+
+def normalize_bank_row(
+    row: pd.Series,
+    *,
+    source_file: str = "",
+    source: str = "BANK",
+    original_row: Optional[int] = None,
+) -> Dict[str, Any]:
     """
     Convert one heterogeneous bank statement row into
     the application's canonical representation.
     """
 
     date = _get_value(row, BANK_DATE_ALIASES)
+    if date is None:
+        date = _get_value(row, BANK_VALUE_DATE_ALIASES)
 
-    debit = _parse_amount(
-        _get_value(row, BANK_DEBIT_ALIASES)
+    amount, direction, amount_error = _derive_bank_amount(row)
+
+    narration = _get_value(row, BANK_NARRATION_ALIASES)
+    counterparty = _get_value(row, BANK_COUNTERPARTY_ALIASES) or narration
+
+    reference = _get_value(row, BANK_REFERENCE_ALIASES)
+    utr = _get_value(row, BANK_UTR_ALIASES) or reference
+    settlement_reference = (
+        _get_value(row, BANK_SETTLEMENT_REFERENCE_ALIASES)
+        or utr
+        or reference
     )
 
-    credit = _parse_amount(
-        _get_value(row, BANK_CREDIT_ALIASES)
-    )
-
-    amount = _parse_amount(
-        _get_value(row, BANK_AMOUNT_ALIASES)
-    )
-
-    # For banking statements, a credit/deposit is the amount
-    # relevant to Razorpay settlement reconciliation.
-    if credit is not None:
-        canonical_amount = credit
-        direction = "CREDIT"
-    elif debit is not None:
-        canonical_amount = debit
-        direction = "DEBIT"
-    else:
-        canonical_amount = amount
-        direction = None
-
-    narration = _get_value(
-        row,
-        BANK_NARRATION_ALIASES,
-    )
-
-    reference = _get_value(
-        row,
-        BANK_REFERENCE_ALIASES,
-    )
+    transaction_id = _get_value(row, BANK_TRANSACTION_ID_ALIASES)
+    if transaction_id is None:
+        # Usable identifier from real cross-system evidence only.
+        transaction_id = utr or reference or settlement_reference
 
     normalized = {
-        # Existing canonical fields
-        "transaction_id": reference or f"ROW_{id(row)}",
+        "transaction_id": transaction_id,
         "date": _parse_date(date),
-        "amount": canonical_amount,
-        "counterparty": narration,
-
-        # New canonical settlement evidence
-        "bank_utr": reference,
+        "amount": amount,
+        "counterparty": counterparty,
+        "bank_utr": utr,
         "bank_reference": reference,
-        "settlement_reference": reference,
-
-        # Useful banking metadata
+        "settlement_reference": settlement_reference,
         "direction": direction,
         "value_date": _parse_date(
             _get_value(row, BANK_VALUE_DATE_ALIASES)
         ),
         "description": narration,
-
-        # Preserve source data for auditability
-        "original_data": {
-            str(key): _clean_value(value)
-            for key, value in row.to_dict().items()
-        },
+        "currency": _get_value(row, ["currency", "ccy"]) or "INR",
+        "source": source,
+        "source_file": source_file,
+        "original_row": original_row,
+        "original_data": _original_payload(row),
     }
+
+    if amount_error:
+        normalized["_row_error"] = amount_error
 
     return normalized
 
 
 def normalize_bank_dataframe(
     df: pd.DataFrame,
+    *,
+    source_file: str = "",
+    source: str = "BANK",
 ) -> pd.DataFrame:
     """
     Normalize an entire bank statement dataframe.
     """
     records = [
-        normalize_bank_row(row)
-        for _, row in df.iterrows()
+        normalize_bank_row(
+            row,
+            source_file=source_file,
+            source=source,
+            original_row=int(index) if not isinstance(index, int) else index,
+        )
+        for index, row in df.iterrows()
     ]
 
+    # Preserve stable integer positions for audit.
+    for position, record in enumerate(records):
+        if record.get("original_row") is None:
+            record["original_row"] = position
+
+    return pd.DataFrame(records)
+
+
+# ============================================================
+# ERP / invoice normalization
+# ============================================================
+
+def normalize_erp_row(
+    row: pd.Series,
+    *,
+    source_file: str = "",
+    source: str = "ERP",
+    original_row: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Convert one ERP / invoice row into canonical ERP fields."""
+
+    invoice_id = _get_value(row, ERP_INVOICE_ALIASES)
+    reference = _get_value(row, ERP_REFERENCE_ALIASES)
+    vendor = _get_value(row, ERP_VENDOR_ALIASES)
+    amount = _parse_amount(_get_value(row, ERP_AMOUNT_ALIASES))
+    date = _parse_date(_get_value(row, ERP_DATE_ALIASES))
+
+    return {
+        "invoice_id": invoice_id,
+        "date": date,
+        "amount": amount,
+        "vendor": vendor,
+        "reference": reference,
+        "currency": _get_value(row, ["currency", "ccy"]) or "INR",
+        "source": source,
+        "source_file": source_file,
+        "original_row": original_row,
+        "original_data": _original_payload(row),
+    }
+
+
+def normalize_erp_dataframe(
+    df: pd.DataFrame,
+    *,
+    source_file: str = "",
+    source: str = "ERP",
+) -> pd.DataFrame:
+    records = []
+    for position, (index, row) in enumerate(df.iterrows()):
+        records.append(
+            normalize_erp_row(
+                row,
+                source_file=source_file,
+                source=source,
+                original_row=position,
+            )
+        )
     return pd.DataFrame(records)
 
 
@@ -390,6 +669,10 @@ def normalize_bank_dataframe(
 
 def normalize_razorpay_row(
     row: pd.Series,
+    *,
+    source_file: str = "",
+    source: str = "RAZORPAY",
+    original_row: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Convert one Razorpay settlement/reconciliation row
@@ -416,7 +699,7 @@ def normalize_razorpay_row(
     )
 
     normalized = {
-        # Existing generic compatibility fields
+        # Existing generic compatibility fields for matcher/ERP path
         "invoice_id": settlement_id,
         "reference": settlement_utr or settlement_id,
         "date": _parse_date(settlement_date),
@@ -452,11 +735,13 @@ def normalize_razorpay_row(
             RAZORPAY_STATUS_ALIASES,
         ),
 
+        "currency": "INR",
+        "source": source,
+        "source_file": source_file,
+        "original_row": original_row,
+
         # Preserve source data
-        "original_data": {
-            str(key): _clean_value(value)
-            for key, value in row.to_dict().items()
-        },
+        "original_data": _original_payload(row),
     }
 
     return normalized
@@ -464,13 +749,21 @@ def normalize_razorpay_row(
 
 def normalize_razorpay_dataframe(
     df: pd.DataFrame,
+    *,
+    source_file: str = "",
+    source: str = "RAZORPAY",
 ) -> pd.DataFrame:
     """
     Normalize an entire Razorpay settlement dataframe.
     """
-    records = [
-        normalize_razorpay_row(row)
-        for _, row in df.iterrows()
-    ]
-
+    records = []
+    for position, (_, row) in enumerate(df.iterrows()):
+        records.append(
+            normalize_razorpay_row(
+                row,
+                source_file=source_file,
+                source=source,
+                original_row=position,
+            )
+        )
     return pd.DataFrame(records)
