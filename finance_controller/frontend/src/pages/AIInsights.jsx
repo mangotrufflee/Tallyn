@@ -8,6 +8,7 @@ import {
   getAIInsights,
   getMetrics,
 } from "../services/api";
+import { hasGroundTruth } from "../utils/workflow";
 
 
 function AIInsights() {
@@ -299,11 +300,13 @@ function AIInsights() {
           </div>
 
           <div className="kpi-value">
-            {metrics?.ai_recommendation_accuracy ?? "—"}%
+            {hasGroundTruth(metrics) ? `${metrics.ai_recommendation_accuracy}%` : "—"}
           </div>
 
           <div className="kpi-footer neutral-text">
-            Accuracy among AI MATCH recommendations
+            {hasGroundTruth(metrics)
+              ? "Accuracy among AI MATCH recommendations"
+              : "Ground truth unavailable"}
           </div>
 
         </div>

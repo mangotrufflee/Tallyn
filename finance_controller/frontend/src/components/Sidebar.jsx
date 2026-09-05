@@ -1,34 +1,39 @@
-import { NavLink } from "react-router-dom";
-
+import { NavLink, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { getSummary } from "../services/api";
 
 function Sidebar() {
+  const [summary, setSummary] = useState(null);
+  const location = useLocation();
+
+  useEffect(() => {
+    getSummary()
+      .then(setSummary)
+      .catch(() => setSummary(null));
+  }, [location.pathname]);
+
+  const review = summary?.review || 0;
+  const exceptions = summary?.exceptions || 0;
 
   return (
-
     <aside className="sidebar">
-
-      {/* BRAND */}
-
       <div className="brand">
-
-        <div className="brand-icon">
-          ₿
-        </div>
-
+        <div className="brand-icon">₿</div>
         <div>
           <h2>Finance</h2>
           <span>Controller</span>
         </div>
-
       </div>
 
-
-      {/* NAVIGATION */}
-
       <nav className="navigation">
-
         <div className="nav-section">
-          <p className="nav-label">OPERATIONS</p>
+          <p className="nav-label">WORKFLOW</p>
+
+          <NavLink to="/" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} end>
+            <span>▦</span>
+            Dashboard
+          </NavLink>
+
           <NavLink
             to="/new-reconciliation"
             className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
@@ -36,111 +41,56 @@ function Sidebar() {
             <span>＋</span>
             New Reconciliation
           </NavLink>
-        </div>
-
-        {/* WORKSPACE */}
-
-        <div className="nav-section">
-
-          <p className="nav-label">
-            WORKSPACE
-          </p>
-
-
-          <NavLink
-            to="/"
-            className={({ isActive }) =>
-              `nav-item ${isActive ? "active" : ""}`
-            }
-          >
-            <span>▦</span>
-            Overview
-          </NavLink>
-
 
           <NavLink
             to="/transactions"
-            className={({ isActive }) =>
-              `nav-item ${isActive ? "active" : ""}`
-            }
+            className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           >
             <span>↔</span>
             Transactions
           </NavLink>
 
-
           <NavLink
             to="/exceptions"
-            className={({ isActive }) =>
-              `nav-item ${isActive ? "active" : ""}`
-            }
+            className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           >
             <span>⚠</span>
             Exceptions
+            {exceptions > 0 && <em className="nav-badge">{exceptions}</em>}
           </NavLink>
 
-        </div>
-
-
-        {/* INTELLIGENCE */}
-
-        <div className="nav-section">
-
-          <p className="nav-label">
-            INTELLIGENCE
-          </p>
-
+          <NavLink
+            to="/verification"
+            className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+          >
+            <span>✓</span>
+            Verification
+            {review > 0 && <em className="nav-badge">{review}</em>}
+          </NavLink>
 
           <NavLink
             to="/ai-insights"
-            className={({ isActive }) =>
-              `nav-item ${isActive ? "active" : ""}`
-            }
+            className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
           >
             <span>✦</span>
             AI Insights
           </NavLink>
-
-
-          <NavLink
-            to="/verification"
-            className={({ isActive }) =>
-              `nav-item ${isActive ? "active" : ""}`
-            }
-          >
-            <span>✓</span>
-            Verification
-          </NavLink>
-
         </div>
-
       </nav>
 
-
-      {/* SYSTEM STATUS */}
-
       <div className="system-status">
-
         <div className="status-dot"></div>
-
         <div>
-
-          <strong>
-            System Online
-          </strong>
-
+          <strong>System Online</strong>
           <span>
-            AI engine connected
+            {review + exceptions > 0
+              ? `${review + exceptions} items need review`
+              : "No pending review"}
           </span>
-
         </div>
-
       </div>
-
     </aside>
-
   );
 }
-
 
 export default Sidebar;

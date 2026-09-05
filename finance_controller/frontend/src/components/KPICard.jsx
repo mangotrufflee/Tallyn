@@ -2,9 +2,11 @@ function KPICard({
   title,
   value,
   description,
+  subtitle,
   type = "neutral",
   icon,
 }) {
+  const footer = description ?? subtitle;
   return (
     <div className="kpi-card">
       <div className="kpi-top">
@@ -20,7 +22,7 @@ function KPICard({
       </div>
 
       <div className={`kpi-footer ${type}-text`}>
-        {description}
+        {footer}
       </div>
     </div>
   );

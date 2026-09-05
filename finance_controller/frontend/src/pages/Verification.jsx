@@ -1,11 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { getVerification } from "../services/api";
+import { Link, useSearchParams } from "react-router-dom";
+import WorkflowProgress from "../components/WorkflowProgress";
+import { getVerification, reviewTransaction } from "../services/api";
+import { formatAmount, formatDate, parseChecks } from "../utils/workflow";
 
-function Verification() {
+function isPending(record) {
+  return (
+    record.review_status !== "COMPLETED" &&
+    (record.verification_decision === "REVIEW" ||
+      record.verification_decision === "EXCEPTION")
+  );
+}
+
+export default function Verification() {
+  const [searchParams] = useSearchParams();
+  const focusId = searchParams.get("transactionId");
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notes, setNotes] = useState({});
+  const [busyId, setBusyId] = useState("");
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     async function loadVerification() {
@@ -18,59 +33,51 @@ function Verification() {
         setLoading(false);
       }
     }
-
     loadVerification();
   }, []);
 
+  useEffect(() => {
+    if (!focusId) return;
+    const node = document.getElementById(`item-${focusId}`);
+    if (node) node.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusId, records]);
+
+  const pending = useMemo(() => records.filter(isPending), [records]);
   const stats = useMemo(() => {
-    const verified = records.filter(
-      (record) => record.verification_decision
-    );
-
-    const passed = verified.filter(
-      (record) => record.verification_decision === "MATCHED"
-    ).length;
-
-    const review = verified.filter(
-      (record) => record.verification_decision === "REVIEW"
-    ).length;
-
-    const exceptions = verified.filter(
-      (record) => record.verification_decision === "EXCEPTION"
-    ).length;
-
-    const aiMatches = records.filter(
-      (record) => record.ai_decision === "MATCH"
-    ).length;
-
     const guardApproved = records.filter(
-      (record) =>
-        record.ai_decision === "MATCH" &&
-        record.verification_decision === "MATCHED"
+      (record) => record.ai_decision === "MATCH" && record.verification_decision === "MATCHED"
     ).length;
-
     const blocked = records.filter(
-      (record) =>
-        record.ai_decision === "MATCH" &&
-        record.verification_decision !== "MATCHED"
+      (record) => record.ai_decision === "MATCH" && record.verification_decision !== "MATCHED"
     ).length;
+    return { total: records.length, pending: pending.length, guardApproved, blocked };
+  }, [records, pending.length]);
 
-    return {
-      total: records.length,
-      verified: verified.length,
-      passed,
-      review,
-      exceptions,
-      aiMatches,
-      guardApproved,
-      blocked,
-    };
-  }, [records]);
+  async function submitReview(transactionId, decision) {
+    const note = notes[transactionId] || "";
+    if ((decision === "REJECT" || decision === "UNRESOLVED") && !note.trim()) {
+      setMessage("Add a comment before rejecting or keeping an exception.");
+      return;
+    }
+    setBusyId(transactionId);
+    setMessage("");
+    try {
+      await reviewTransaction(transactionId, decision, note);
+      const data = await getVerification();
+      setRecords(data);
+      setNotes((current) => ({ ...current, [transactionId]: "" }));
+      setMessage(`Decision saved for ${transactionId}.`);
+    } catch (err) {
+      setMessage(err.message || "Unable to submit review.");
+    } finally {
+      setBusyId("");
+    }
+  }
 
   if (loading) {
     return (
       <div className="verification-page">
-        <div className="page-loading">Loading verification data...</div>
+        <div className="page-loading">Loading verification queue...</div>
       </div>
     );
   }
@@ -85,372 +92,114 @@ function Verification() {
 
   return (
     <div className="verification-page">
-
-      {/* HEADER */}
       <div className="page-header">
         <div>
-          <div className="verification-badge">
-            VERIFICATION LAYER
-          </div>
-
-          <h1>Verification Guard</h1>
-
-          <p>
-            Independent checks that validate AI recommendations
-            before they become final reconciliation decisions.
-          </p>
+          <div className="verification-badge">HUMAN WORK QUEUE</div>
+          <h1>Verification</h1>
+          <p>Unresolved transactions after AI recommendation and Verification Guard. Decide each item, then it leaves this queue.</p>
         </div>
       </div>
 
-      {/* KPI CARDS */}
+      <WorkflowProgress
+        currentStep={pending.length ? 4 : 5}
+        hint={pending.length ? `${pending.length} items waiting for a human decision.` : "Queue is clear."}
+      />
+
       <div className="verification-kpis">
-
-        <div className="verification-kpi">
-          <span>Total Records</span>
-          <strong>{stats.total}</strong>
-          <small>Transactions evaluated</small>
-        </div>
-
-        <div className="verification-kpi">
-          <span>Verified</span>
-          <strong>{stats.verified}</strong>
-          <small>Records with guard decisions</small>
-        </div>
-
-        <div className="verification-kpi">
-          <span>Guard Approved</span>
-          <strong>{stats.guardApproved}</strong>
-          <small>AI matches independently verified</small>
-        </div>
-
-        <div className="verification-kpi">
-          <span>AI Matches Blocked</span>
-          <strong>{stats.blocked}</strong>
-          <small>AI recommendations stopped</small>
-        </div>
-
+        <div className="verification-kpi"><span>Pending</span><strong>{stats.pending}</strong><small>Need a human decision</small></div>
+        <div className="verification-kpi"><span>Guard Approved</span><strong>{stats.guardApproved}</strong><small>AI matches independently verified</small></div>
+        <div className="verification-kpi"><span>Guard Rejected</span><strong>{stats.blocked}</strong><small>AI matches blocked</small></div>
+        <div className="verification-kpi"><span>All records</span><strong>{stats.total}</strong><small>In the current batch</small></div>
       </div>
 
-      {/* PIPELINE */}
-      <div className="verification-card">
+      {message && <div className="review-message">{message}</div>}
 
+      <div className="verification-card">
         <div className="section-heading">
           <div>
-            <h2>Verification Pipeline</h2>
-            <p>
-              AI recommendations pass through an independent
-              verification layer before becoming trusted matches.
-            </p>
+            <h2>Pending decisions</h2>
+            <p>Approve the match, reject it, or keep it as an exception.</p>
           </div>
+          <span className="table-count">{pending.length} open</span>
         </div>
 
-        <div className="verification-flow">
-
-          <div className="verification-flow-step">
-            <div className="verification-flow-number">01</div>
-            <strong>Deterministic Match</strong>
-            <span>
-              Rules-based candidate selection
-            </span>
+        {pending.length === 0 ? (
+          <div className="empty-state">
+            <h2>No pending verification items</h2>
+            <p>Human review is complete for the current batch.</p>
           </div>
-
-          <div className="verification-arrow">→</div>
-
-          <div className="verification-flow-step">
-            <div className="verification-flow-number">02</div>
-            <strong>AI Reasoning</strong>
-            <span>
-              Semantic analysis of uncertain cases
-            </span>
-          </div>
-
-          <div className="verification-arrow">→</div>
-
-          <div className="verification-flow-step verification-highlight">
-            <div className="verification-flow-number">03</div>
-            <strong>Verification Guard</strong>
-            <span>
-              Independent consistency checks
-            </span>
-          </div>
-
-          <div className="verification-arrow">→</div>
-
-          <div className="verification-flow-step">
-            <div className="verification-flow-number">04</div>
-            <strong>Final Decision</strong>
-            <span>
-              Match, review or exception
-            </span>
-          </div>
-
-        </div>
-      </div>
-
-      {/* OUTCOME SUMMARY */}
-      <div className="verification-grid">
-
-        <div className="verification-card">
-          <div className="section-heading">
-            <div>
-              <h2>Guard Outcomes</h2>
-              <p>Final decisions produced by the verification layer.</p>
-            </div>
-          </div>
-
-          <div className="verification-bars">
-
-            <div className="verification-bar-row">
-              <div className="verification-bar-label">
-                <span>Verified Match</span>
-                <strong>{stats.passed}</strong>
-              </div>
-
-              <div className="verification-bar">
-                <div
-                  className="verification-bar-fill"
-                  style={{
-                    width: `${
-                      stats.verified
-                        ? (stats.passed / stats.verified) * 100
-                        : 0
-                    }%`,
-                  }}
-                />
-              </div>
-            </div>
-
-            <div className="verification-bar-row">
-              <div className="verification-bar-label">
-                <span>Review</span>
-                <strong>{stats.review}</strong>
-              </div>
-
-              <div className="verification-bar">
-                <div
-                  className="verification-bar-fill"
-                  style={{
-                    width: `${
-                      stats.verified
-                        ? (stats.review / stats.verified) * 100
-                        : 0
-                    }%`,
-                  }}
-                />
-              </div>
-            </div>
-
-            <div className="verification-bar-row">
-              <div className="verification-bar-label">
-                <span>Exception</span>
-                <strong>{stats.exceptions}</strong>
-              </div>
-
-              <div className="verification-bar">
-                <div
-                  className="verification-bar-fill"
-                  style={{
-                    width: `${
-                      stats.verified
-                        ? (stats.exceptions / stats.verified) * 100
-                        : 0
-                    }%`,
-                  }}
-                />
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* PRINCIPLE CARD */}
-        <div className="verification-card verification-principle">
-
-          <div className="verification-principle-icon">
-            ✓
-          </div>
-
-          <div>
-            <span className="verification-label">
-              CONTROL PRINCIPLE
-            </span>
-
-            <h2>AI recommends. Verification decides.</h2>
-
-            <p>
-              The AI model is intentionally advisory. A recommendation
-              can only become a trusted match when the verification
-              layer independently validates it.
-            </p>
-          </div>
-
-        </div>
-
-      </div>
-
-      {/* VERIFICATION TABLE */}
-      <div className="verification-card">
-
-        <div className="section-heading">
-          <div>
-            <h2>Verification Records</h2>
-            <p>
-              Detailed evidence behind each AI-assisted verification.
-            </p>
-          </div>
-
-          <span className="table-count">
-            {records.length} records
-          </span>
-        </div>
-
-        <div className="verification-table-wrapper">
-
-          <table className="verification-table">
-
-            <thead>
-              <tr>
-                <th>Transaction</th>
-                <th>AI Decision</th>
-                <th>AI Confidence</th>
-                <th>Risk</th>
-                <th>Guard Decision</th>
-                <th>Checks</th>
-                <th></th>
-              </tr>
-            </thead>
-
-            <tbody>
-
-              {records
-                .filter((record) => record.ai_decision)
-                .map((record) => {
-
-                  const checks =
-                    record.verification_checks || {};
-
-                  const checkEntries =
-                    Object.entries(checks);
-
-                  return (
-                    <tr key={record.transaction_id}>
-
-                      <td>
-                        <div className="verification-transaction">
-                          <strong>
-                            {record.transaction_id}
-                          </strong>
-
-                          <span>
-                            {record.counterparty}
-                          </span>
-                        </div>
-                      </td>
-
-                      <td>
-                        <span
-                          className={`verification-decision ${
-                            record.ai_decision === "MATCH"
-                              ? "decision-match"
-                              : "decision-review"
-                          }`}
-                        >
-                          {record.ai_decision}
+        ) : (
+          <div className="queue-list">
+            {pending.map((record) => {
+              const checks = parseChecks(record.verification_checks);
+              const focused = record.transaction_id === focusId;
+              return (
+                <article
+                  key={record.transaction_id}
+                  className={`queue-card ${focused ? "is-focused" : ""}`}
+                  id={`item-${record.transaction_id}`}
+                >
+                  <div className="queue-card-top">
+                    <div>
+                      <strong>{record.transaction_id}</strong>
+                      <span>{record.counterparty || "—"}</span>
+                    </div>
+                    <span className={`status-badge status-${(record.verification_decision || "review").toLowerCase()}`}>
+                      {record.verification_decision}
+                    </span>
+                  </div>
+                  <div className="queue-meta">
+                    <span>Amount <strong>{formatAmount(record)}</strong></span>
+                    <span>Date <strong>{formatDate(record.date)}</strong></span>
+                    <span>AI <strong>{record.ai_decision || "—"}</strong></span>
+                    <span>Confidence <strong>{
+                      record.ai_confidence == null
+                        ? "—"
+                        : Number(record.ai_confidence) <= 1
+                          ? `${Math.round(Number(record.ai_confidence) * 100)}%`
+                          : `${record.ai_confidence}%`
+                    }</strong></span>
+                    <span>Guard <strong>{record.verification_decision || "—"}</strong></span>
+                  </div>
+                  {record.ai_reason && <p className="queue-reason">{record.ai_reason}</p>}
+                  {record.verification_reason && <p className="queue-reason">{record.verification_reason}</p>}
+                  {Object.keys(checks).length > 0 && (
+                    <div className="check-list check-list-inline">
+                      {Object.entries(checks).map(([key, value]) => (
+                        <span key={key} className={value === true ? "check-pass" : value === false ? "check-fail" : "check-neutral"}>
+                          {value === true ? "✓" : value === false ? "×" : "•"} {key.replaceAll("_", " ")}
                         </span>
-                      </td>
-
-                      <td>
-                        {record.ai_confidence
-                          ? `${(
-                              Number(record.ai_confidence) * 100
-                            ).toFixed(0)}%`
-                          : "—"}
-                      </td>
-
-                      <td>
-                        <span
-                          className={`risk-badge ${
-                            record.ai_risk === "LOW"
-                              ? "risk-low"
-                              : record.ai_risk === "MEDIUM"
-                              ? "risk-medium"
-                              : record.ai_risk === "HIGH"
-                              ? "risk-high"
-                              : "risk-unknown"
-                          }`}
-                        >
-                          {record.ai_risk || "UNKNOWN"}
-                        </span>
-                      </td>
-
-                      <td>
-                        <span
-                          className={`verification-decision ${
-                            record.verification_decision === "MATCHED"
-                              ? "decision-match"
-                              : record.verification_decision === "REVIEW"
-                              ? "decision-review"
-                              : "decision-exception"
-                          }`}
-                        >
-                          {record.verification_decision || "PENDING"}
-                        </span>
-                      </td>
-
-                      <td>
-                        <div className="check-list">
-
-                          {checkEntries.length > 0 ? (
-                            checkEntries.map(([key, value]) => (
-                              <span
-                                key={key}
-                                className={
-                                  value === true
-                                    ? "check-pass"
-                                    : value === false
-                                    ? "check-fail"
-                                    : "check-neutral"
-                                }
-                              >
-                                {value === true
-                                  ? "✓"
-                                  : value === false
-                                  ? "×"
-                                  : "•"}{" "}
-                                {key.replaceAll("_", " ")}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="check-neutral">
-                              No checks available
-                            </span>
-                          )}
-
-                        </div>
-                      </td>
-
-                      <td>
-                        <Link
-                          to={`/transactions/${record.transaction_id}`}
-                          className="verification-view"
-                        >
-                          View
-                        </Link>
-                      </td>
-
-                    </tr>
-                  );
-                })}
-
-            </tbody>
-
-          </table>
-
-        </div>
+                      ))}
+                    </div>
+                  )}
+                  <textarea
+                    className="review-note"
+                    placeholder="Comment required for reject or keep as exception"
+                    value={notes[record.transaction_id] || ""}
+                    onChange={(event) =>
+                      setNotes((current) => ({ ...current, [record.transaction_id]: event.target.value }))
+                    }
+                  />
+                  <div className="review-actions">
+                    <button className="review-button approve" disabled={busyId === record.transaction_id} onClick={() => submitReview(record.transaction_id, "APPROVE")}>
+                      Approve Match
+                    </button>
+                    <button className="review-button reject" disabled={busyId === record.transaction_id} onClick={() => submitReview(record.transaction_id, "REJECT")}>
+                      Reject Match
+                    </button>
+                    <button className="review-button unresolved" disabled={busyId === record.transaction_id} onClick={() => submitReview(record.transaction_id, "UNRESOLVED")}>
+                      Keep as Exception
+                    </button>
+                    <Link className="verification-view" to={`/transactions/${record.transaction_id}`}>
+                      Open evidence →
+                    </Link>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </div>
-
     </div>
   );
 }
-
-export default Verification;

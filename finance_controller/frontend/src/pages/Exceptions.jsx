@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import WorkflowProgress from "../components/WorkflowProgress";
 import { getExceptions } from "../services/api";
+import { formatAmount } from "../utils/workflow";
 
-function Exceptions() {
+function exceptionType(item) {
+  if (item.verification_decision === "EXCEPTION") return "Exception";
+  if (item.verification_decision === "REVIEW") return "Needs review";
+  return item.verification_decision || "Open";
+}
+
+export default function Exceptions() {
   const [exceptions, setExceptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -18,7 +26,6 @@ function Exceptions() {
         setLoading(false);
       }
     }
-
     loadExceptions();
   }, []);
 
@@ -35,7 +42,6 @@ function Exceptions() {
     return (
       <div className="page-container">
         <h1>Exceptions</h1>
-
         <div className="empty-state">
           <h2>Something went wrong</h2>
           <p>{error}</p>
@@ -46,185 +52,96 @@ function Exceptions() {
 
   return (
     <div className="page-container">
-
-      {/* Header */}
       <div className="page-header">
         <div>
           <h1>Exceptions</h1>
-          <p>
-            Transactions that require human review or could not be resolved
-          </p>
+          <p>Actionable queue of transactions that still need a human decision.</p>
         </div>
-
-        <div className="exception-count">
-          {exceptions.length} Open
-        </div>
+        <div className="exception-count">{exceptions.length} Open</div>
       </div>
 
-      {/* Summary */}
+      <WorkflowProgress
+        currentStep={exceptions.length ? 4 : 5}
+        hint={exceptions.length ? "Open an item to review evidence and decide." : "No open exceptions."}
+      />
+
       <div className="exception-summary">
         <div className="summary-box">
-          <span>Total Exceptions</span>
+          <span>Total open</span>
           <strong>{exceptions.length}</strong>
         </div>
-
         <div className="summary-box">
-          <span>Requires Review</span>
-          <strong>
-            {
-              exceptions.filter(
-                (item) =>
-                  item.verification_decision === "REVIEW"
-              ).length
-            }
-          </strong>
+          <span>Needs review</span>
+          <strong>{exceptions.filter((item) => item.verification_decision === "REVIEW").length}</strong>
         </div>
-
         <div className="summary-box">
-          <span>Unresolved</span>
-          <strong>
-            {
-              exceptions.filter(
-                (item) =>
-                  item.verification_decision === "EXCEPTION"
-              ).length
-            }
-          </strong>
+          <span>Exceptions</span>
+          <strong>{exceptions.filter((item) => item.verification_decision === "EXCEPTION").length}</strong>
         </div>
       </div>
 
-      {/* Exception Table */}
       <div className="dashboard-card exception-card">
         <div className="section-header">
           <div>
             <h2>Review Queue</h2>
-            <p>
-              Review transactions where automated verification was not
-              sufficient
-            </p>
+            <p>Click an exception to open verification and evidence.</p>
           </div>
         </div>
 
         {exceptions.length === 0 ? (
           <div className="empty-state">
             <h2>No exceptions</h2>
-            <p>
-              All transactions have been successfully resolved.
-            </p>
+            <p>All transactions have been resolved.</p>
           </div>
         ) : (
           <div className="table-wrapper">
             <table className="transaction-table">
-
               <thead>
                 <tr>
+                  <th>Type</th>
                   <th>Transaction</th>
-                  <th>Counterparty</th>
                   <th>Amount</th>
-                  <th>Invoice</th>
-                  <th>AI Decision</th>
-                  <th>Verification</th>
-                  <th>Review</th>
-                  <th>Score</th>
-                  <th>Decision</th>
                   <th>Reason</th>
-                  <th></th>
+                  <th>Status</th>
+                  <th>Action</th>
                 </tr>
               </thead>
-
               <tbody>
                 {exceptions.map((transaction) => {
-                  const status =
-                    transaction.verification_decision ||
-                    transaction.deterministic_status ||
-                    "UNKNOWN";
-
+                  const status = transaction.verification_decision || "UNKNOWN";
                   return (
                     <tr key={transaction.transaction_id}>
-
-                      {/* Transaction */}
+                      <td>{exceptionType(transaction)}</td>
                       <td>
-                        <strong>
-                          {transaction.transaction_id}
-                        </strong>
+                        <strong>{transaction.transaction_id}</strong>
+                        <span className="invoice-subtext">{transaction.counterparty || "—"}</span>
                       </td>
-
-                      {/* Counterparty */}
-                      <td>
-                        {transaction.counterparty || "—"}
-                      </td>
-
-                      {/* Amount */}
-                      <td>
-                        <strong>
-                          {transaction.currency === "INR"
-                            ? "₹"
-                            : transaction.currency || ""}
-                          {Number(transaction.amount || 0).toLocaleString(
-                            "en-IN"
-                          )}
-                        </strong>
-                      </td>
-
-                      {/* Invoice */}
-                      <td>
-                        {transaction.matched_invoice || "—"}
-                      </td>
-
-                      {/* AI Decision */}
-                      <td>
-                        {transaction.ai_decision || "—"}
-                      </td>
-
-                      {/* Verification */}
-                      <td>
-                        <span
-                          className={`status-badge status-${status.toLowerCase()}`}
-                        >
-                          {status}
-                        </span>
-                      </td>
-
-                      {/* Review */}
-                      <td>
-                        {transaction.review_status === "COMPLETED"
-                          ? transaction.review_decision
-                          : "Open"}
-                      </td>
-
-                      {/* Score */}
-                      <td>
-                        {transaction.match_score ?? "—"}
-                      </td>
-
-                      {/* Decision */}
-                      <td>
-                        {transaction.review_status === "COMPLETED"
-                          ? transaction.review_decision
-                          : "Pending"}
-                      </td>
-
-                      {/* Reason */}
+                      <td><strong>{formatAmount(transaction)}</strong></td>
                       <td className="reason-cell">
-                        {transaction.verification_reason ||
-                          "Requires manual verification"}
+                        {transaction.verification_reason || transaction.reason || "Requires manual verification"}
                       </td>
-
-                      {/* Action */}
                       <td>
+                        <span className={`status-badge status-${status.toLowerCase()}`}>{status}</span>
+                      </td>
+                      <td>
+                        <Link
+                          to={`/verification?transactionId=${encodeURIComponent(transaction.transaction_id)}`}
+                          className="view-link"
+                        >
+                          Verify →
+                        </Link>
+                        {" "}
                         <Link
                           to={`/transactions/${transaction.transaction_id}`}
                           className="view-link"
                         >
-                          Review →
+                          Details →
                         </Link>
                       </td>
-
                     </tr>
                   );
                 })}
               </tbody>
-
             </table>
           </div>
         )}
@@ -232,5 +149,3 @@ function Exceptions() {
     </div>
   );
 }
-
-export default Exceptions;

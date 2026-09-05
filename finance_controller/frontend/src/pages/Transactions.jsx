@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import "../App.css";
+import WorkflowProgress from "../components/WorkflowProgress";
 import { getTransactions } from "../services/api";
 
 function getFinalStatus(transaction) {
@@ -95,10 +96,11 @@ function Transactions() {
         <h1>Transactions</h1>
 
         <p>
-          Review reconciliation results across all transactions
+          Results for the current reconciliation batch
         </p>
       </div>
     </header>
+    <WorkflowProgress currentStep={4} hint="Open a transaction to see its full decision story." />
 
     {/* Error */}
     {error && (

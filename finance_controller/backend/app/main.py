@@ -10,6 +10,10 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import ast
 
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 # ============================================================
 # PROJECT IMPORTS
@@ -156,7 +160,7 @@ async def read_uploaded_records(upload: UploadFile, required_columns):
         if invalid_dates:
             errors.append(f"{invalid_dates} date value(s) are not parseable.")
     for column in required_columns & set(frame.columns):
-        if frame[column].isna().any() or frame[column].astype(str).str.strip().eq("").any():
+        if frame[column].isna().any() or frame[column].astype("string").str.strip().eq("").any():
             errors.append(f"Column '{column}' contains blank required values.")
 
     identifier = "transaction_id" if "transaction_id" in frame else "invoice_id"
@@ -1592,7 +1596,12 @@ async def reconcile_uploaded_batch(
         erp_file,
         REQUIRED_ERP_COLUMNS,
     )
-    if not bank_info["valid"] or not erp_info["valid"]:
+    if (
+        not bank_info["valid"]
+        or not erp_info["valid"]
+        or bank is None
+        or erp is None
+    ):
         raise HTTPException(
             status_code=422,
             detail={"bank": bank_info, "erp": erp_info},
