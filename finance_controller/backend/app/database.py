@@ -1,4 +1,5 @@
 import sqlite3
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -63,7 +64,8 @@ def initialize_database():
             date TEXT NOT NULL,
             counterparty TEXT,
             amount REAL,
-            currency TEXT
+            currency TEXT,
+            original_data TEXT
         )
         """
     )
@@ -81,7 +83,8 @@ def initialize_database():
             date TEXT,
             vendor TEXT,
             amount REAL,
-            currency TEXT
+            currency TEXT,
+            original_data TEXT
         )
         """
     )
@@ -227,6 +230,28 @@ def initialize_database():
             """
         )
 
+    table_columns = {
+        row[1]
+        for row in cursor.execute(
+            "PRAGMA table_info(transactions)"
+        ).fetchall()
+    }
+    if "original_data" not in table_columns:
+        cursor.execute(
+            "ALTER TABLE transactions ADD COLUMN original_data TEXT"
+        )
+
+    erp_columns = {
+        row[1]
+        for row in cursor.execute(
+            "PRAGMA table_info(erp_records)"
+        ).fetchall()
+    }
+    if "original_data" not in erp_columns:
+        cursor.execute(
+            "ALTER TABLE erp_records ADD COLUMN original_data TEXT"
+        )
+
 
     connection.commit()
 
@@ -264,9 +289,10 @@ def seed_database():
                 date,
                 counterparty,
                 amount,
-                currency
+                currency,
+                original_data
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 str(row["transaction_id"]),
@@ -274,6 +300,7 @@ def seed_database():
                 str(row["counterparty"]),
                 float(row["amount"]),
                 str(row.get("currency", "INR")),
+                json.dumps(row.to_dict(), default=str),
             ),
         )
 
@@ -293,9 +320,10 @@ def seed_database():
                 date,
                 vendor,
                 amount,
-                currency
+                currency,
+                original_data
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(row["invoice_id"]),
@@ -304,6 +332,7 @@ def seed_database():
                 str(row["vendor"]),
                 float(row["amount"]),
                 str(row.get("currency", "INR")),
+                json.dumps(row.to_dict(), default=str),
             ),
         )
 
@@ -399,3 +428,41 @@ def load_erp_data():
 
 
     return data
+
+
+def replace_active_batch(bank, erp):
+    """Replace the active input batch while retaining all row fields."""
+    connection = get_connection()
+    connection.execute("DELETE FROM reconciliation_results")
+    connection.execute("DELETE FROM transactions")
+    connection.execute("DELETE FROM erp_records")
+    connection.execute("DELETE FROM ground_truth")
+
+    for _, row in bank.iterrows():
+        connection.execute(
+            """INSERT INTO transactions
+            (transaction_id, date, counterparty, amount, currency, original_data)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                str(row["transaction_id"]), str(row["date"]),
+                str(row.get("counterparty", "")), float(row["amount"]),
+                str(row.get("currency", "INR")),
+                json.dumps(row.to_dict(), default=str),
+            ),
+        )
+
+    for _, row in erp.iterrows():
+        connection.execute(
+            """INSERT INTO erp_records
+            (invoice_id, reference, date, vendor, amount, currency, original_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                str(row["invoice_id"]), str(row.get("reference", "")),
+                str(row["date"]), str(row.get("vendor", "")),
+                float(row["amount"]), str(row.get("currency", "INR")),
+                json.dumps(row.to_dict(), default=str),
+            ),
+        )
+
+    connection.commit()
+    connection.close()

@@ -1,8 +1,10 @@
 from pathlib import Path
+from io import BytesIO
+import json
 
 import pandas as pd
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from pydantic import BaseModel
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +21,7 @@ from backend.app.database import (
     load_bank_data,
     load_erp_data,
     seed_database,
+    replace_active_batch,
 )
 
 
@@ -49,6 +52,15 @@ from backend.app.reconciliation.verification_guard import (
 # ============================================================
 
 project_root = Path(__file__).resolve().parents[2]
+
+
+def decode_original_fields(value):
+    if not value:
+        return {}
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return {"raw": value}
 
 
 # ============================================================
@@ -87,6 +99,80 @@ class ReviewRequest(BaseModel):
     decision: str
 
     note: str = ""
+
+
+REQUIRED_BANK_COLUMNS = {
+    "transaction_id",
+    "date",
+    "amount",
+    "counterparty",
+}
+REQUIRED_ERP_COLUMNS = {
+    "invoice_id",
+    "date",
+    "amount",
+    "vendor",
+    "reference",
+}
+
+
+async def read_uploaded_records(upload: UploadFile, required_columns):
+    filename = upload.filename or ""
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".csv", ".xlsx", ".xls"}:
+        return None, {
+            "filename": filename,
+            "valid": False,
+            "errors": ["Supported formats are CSV, XLSX, and XLS."],
+        }
+
+    contents = await upload.read()
+    try:
+        if suffix == ".csv":
+            frame = pd.read_csv(BytesIO(contents))
+        else:
+            frame = pd.read_excel(BytesIO(contents))
+    except Exception as exc:
+        return None, {
+            "filename": filename,
+            "valid": False,
+            "errors": [f"File could not be read: {exc}"],
+        }
+
+    errors = []
+    missing = sorted(required_columns - set(frame.columns))
+    if missing:
+        errors.append(f"Missing required columns: {', '.join(missing)}")
+    if frame.empty:
+        errors.append("The file contains no records.")
+    if "amount" in frame:
+        amounts = pd.to_numeric(frame["amount"], errors="coerce")
+        invalid_amounts = amounts.isna().sum()
+        if invalid_amounts:
+            errors.append(f"{invalid_amounts} amount value(s) are not numeric.")
+    if "date" in frame:
+        dates = pd.to_datetime(frame["date"], errors="coerce")
+        invalid_dates = dates.isna().sum()
+        if invalid_dates:
+            errors.append(f"{invalid_dates} date value(s) are not parseable.")
+    for column in required_columns & set(frame.columns):
+        if frame[column].isna().any() or frame[column].astype(str).str.strip().eq("").any():
+            errors.append(f"Column '{column}' contains blank required values.")
+
+    identifier = "transaction_id" if "transaction_id" in frame else "invoice_id"
+    if identifier in frame and frame[identifier].duplicated().any():
+        duplicate_count = int(frame[identifier].duplicated().sum())
+        errors.append(
+            f"{duplicate_count} duplicate {identifier} value(s) found."
+        )
+
+    return frame, {
+        "filename": filename,
+        "records": len(frame),
+        "columns": [str(column) for column in frame.columns],
+        "valid": not errors,
+        "errors": errors,
+    }
 
 
 # ============================================================
@@ -312,11 +398,13 @@ def run_ai_on_transaction(
 # RECONCILIATION ENGINE
 # ============================================================
 
-def run_reconciliation():
+def run_reconciliation(bank=None, erp=None):
 
-    bank = load_bank_data()
+    if bank is None:
+        bank = load_bank_data()
 
-    erp = load_erp_data()
+    if erp is None:
+        erp = load_erp_data()
 
 
     deterministic_results = []
@@ -1296,6 +1384,7 @@ def get_transactions():
             t.counterparty,
             t.amount,
             t.currency,
+            t.original_data,
 
             r.matched_invoice,
             r.match_score,
@@ -1331,10 +1420,14 @@ def get_transactions():
     connection.close()
 
 
-    return [
-        dict(row)
-        for row in rows
-    ]
+    results = []
+    for row in rows:
+        item = dict(row)
+        item["bank_fields"] = decode_original_fields(
+            item.pop("original_data", None)
+        )
+        results.append(item)
+    return results
 
 
 # ============================================================
@@ -1358,6 +1451,7 @@ def get_transaction(
             t.counterparty,
             t.amount,
             t.currency,
+            t.original_data,
 
             r.matched_invoice,
             r.match_score,
@@ -1405,7 +1499,25 @@ def get_transaction(
         )
 
 
-    return dict(row)
+    result = dict(row)
+    result["bank_fields"] = decode_original_fields(
+        result.pop("original_data", None)
+    )
+
+    if result.get("matched_invoice"):
+        erp_connection = get_connection()
+        erp_row = erp_connection.execute(
+            "SELECT original_data FROM erp_records WHERE invoice_id = ?",
+            (result["matched_invoice"],),
+        ).fetchone()
+        erp_connection.close()
+        if erp_row:
+            result["erp_fields"] = decode_original_fields(
+                erp_row["original_data"]
+            )
+    else:
+        result["erp_fields"] = {}
+    return result
 
 
 # ============================================================
@@ -1607,6 +1719,61 @@ def review_transaction(
 # ============================================================
 # RUN RECONCILIATION
 # ============================================================
+
+@app.post("/reconcile/validate")
+async def validate_reconciliation_upload(
+    bank_file: UploadFile = File(...),
+    erp_file: UploadFile = File(...),
+):
+    _, bank_info = await read_uploaded_records(
+        bank_file,
+        REQUIRED_BANK_COLUMNS,
+    )
+    _, erp_info = await read_uploaded_records(
+        erp_file,
+        REQUIRED_ERP_COLUMNS,
+    )
+    return {
+        "valid": bank_info["valid"] and erp_info["valid"],
+        "bank": bank_info,
+        "erp": erp_info,
+    }
+
+
+@app.post("/reconcile/upload")
+async def reconcile_uploaded_batch(
+    bank_file: UploadFile = File(...),
+    erp_file: UploadFile = File(...),
+):
+    bank, bank_info = await read_uploaded_records(
+        bank_file,
+        REQUIRED_BANK_COLUMNS,
+    )
+    erp, erp_info = await read_uploaded_records(
+        erp_file,
+        REQUIRED_ERP_COLUMNS,
+    )
+    if not bank_info["valid"] or not erp_info["valid"]:
+        raise HTTPException(
+            status_code=422,
+            detail={"bank": bank_info, "erp": erp_info},
+        )
+
+    bank["date"] = pd.to_datetime(bank["date"])
+    erp["date"] = pd.to_datetime(erp["date"])
+    bank["amount"] = pd.to_numeric(bank["amount"])
+    erp["amount"] = pd.to_numeric(erp["amount"])
+
+    initialize_database()
+    replace_active_batch(bank, erp)
+    result = run_reconciliation(bank, erp)
+    return {
+        "status": "completed",
+        "bank": bank_info,
+        "erp": erp_info,
+        **result,
+    }
+
 
 @app.post("/reconcile")
 def reconcile():

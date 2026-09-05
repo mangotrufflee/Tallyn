@@ -213,8 +213,6 @@ function Transactions() {
               <tbody>
                 {filteredTransactions.map((transaction) => {
 
-                  const finalStatus = getFinalStatus(transaction);
-
                   return (
                     <tr key={transaction.transaction_id}>
 

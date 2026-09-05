@@ -4,3 +4,6 @@ numpy
 openai
 fastapi
 uvicorn
+python-multipart
+openpyxl
+xlrd

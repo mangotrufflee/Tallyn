@@ -203,3 +203,26 @@ export async function reconcileTransactions() {
 
   return response.json();
 }
+
+async function sendBatchRequest(path, formData) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    const message = typeof detail.detail === "string"
+      ? detail.detail
+      : detail.detail?.message || JSON.stringify(detail.detail || {});
+    throw new Error(message || "Batch request failed");
+  }
+  return response.json();
+}
+
+export function validateReconciliationUpload(formData) {
+  return sendBatchRequest("/reconcile/validate", formData);
+}
+
+export function reconcileUploadedBatch(formData) {
+  return sendBatchRequest("/reconcile/upload", formData);
+}

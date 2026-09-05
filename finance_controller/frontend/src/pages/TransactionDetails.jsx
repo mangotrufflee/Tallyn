@@ -10,6 +10,33 @@ import {
   reviewTransaction,
 } from "../services/api";
 
+function OriginalFields({ title, fields }) {
+  const entries = Object.entries(fields || {});
+
+  return (
+    <div className="dashboard-card original-fields-card">
+      <div className="section-header">
+        <div>
+          <h2>{title}</h2>
+          <p>Original uploaded record fields retained for audit.</p>
+        </div>
+        <span className="table-count">{entries.length} fields</span>
+      </div>
+      {entries.length === 0 ? (
+        <p className="muted-note">No original fields available.</p>
+      ) : (
+        <div className="original-fields-grid">
+          {entries.map(([key, value]) => (
+            <div className="original-field" key={key}>
+              <span>{key.replaceAll("_", " ")}</span>
+              <strong>{String(value ?? "—")}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function TransactionDetails() {
 
@@ -424,6 +451,11 @@ function TransactionDetails() {
 
         </div>
 
+      </div>
+
+      <div className="original-fields-stack">
+        <OriginalFields title="Original Bank Record" fields={transaction.bank_fields} />
+        <OriginalFields title="Original ERP / Miscellaneous Record" fields={transaction.erp_fields} />
       </div>
 
 

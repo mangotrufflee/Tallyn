@@ -27,6 +27,17 @@ function Sidebar() {
 
       <nav className="navigation">
 
+        <div className="nav-section">
+          <p className="nav-label">OPERATIONS</p>
+          <NavLink
+            to="/new-reconciliation"
+            className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+          >
+            <span>＋</span>
+            New Reconciliation
+          </NavLink>
+        </div>
+
         {/* WORKSPACE */}
 
         <div className="nav-section">

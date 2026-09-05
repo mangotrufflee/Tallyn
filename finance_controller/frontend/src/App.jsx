@@ -8,6 +8,7 @@ import Exceptions from "./pages/Exceptions";
 import TransactionDetails from "./pages/TransactionDetails";
 import AIInsights from "./pages/AIInsights";
 import Verification from "./pages/Verification";
+import NewReconciliation from "./pages/NewReconciliation";
 
 import "./App.css";
 
@@ -22,6 +23,11 @@ function App() {
         <main className="main-content">
 
           <Routes>
+
+            <Route
+              path="/new-reconciliation"
+              element={<NewReconciliation />}
+            />
 
             <Route
               path="/"
