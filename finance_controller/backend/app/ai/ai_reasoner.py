@@ -1,4 +1,5 @@
 import json
+import time
 from openai import OpenAI
 
 def build_ai_prompt(bank_row, candidates):
@@ -306,23 +307,30 @@ def ask_ai(prompt):
 
     print("11. Sending request to Qwen...")
 
-    response = client.chat.completions.create(
-        model="qwen2.5:3b",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a cautious finance "
-                    "reconciliation assistant."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0
-    )
+    inference_start = time.perf_counter()
+    try:
+        response = client.chat.completions.create(
+            model="qwen2.5:3b",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a cautious finance "
+                        "reconciliation assistant."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0
+        )
+    finally:
+        print(
+            f"[TIMING] AI inference: "
+            f"{time.perf_counter() - inference_start:.2f}s"
+        )
 
     print("12. Response received")
 

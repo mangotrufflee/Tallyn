@@ -1,6 +1,8 @@
 from pathlib import Path
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import time
 
 import pandas as pd
 
@@ -197,9 +199,35 @@ def run_ai_on_transaction(
     )
 
 
-    raw_response = ask_ai(
-        prompt
-    )
+    try:
+        raw_response = ask_ai(
+            prompt
+        )
+    except Exception as exc:
+        print(
+            f"[AI ERROR] Ollama/Qwen request failed for "
+            f"transaction {bank_row['transaction_id']}: {exc}"
+        )
+
+        return {
+
+            "ai_decision": "EXCEPTION",
+
+            "ai_invoice": None,
+
+            "ai_confidence": 0,
+
+            "ai_reason": f"AI request failed: {exc}",
+
+            "ai_risk": "HIGH",
+
+            "verification_decision": "EXCEPTION",
+
+            "verification_reason":
+                "Ollama/Qwen request failed",
+
+            "verification_checks": None,
+        }
 
 
     validation = validate_ai_response(
@@ -400,6 +428,8 @@ def run_ai_on_transaction(
 
 def run_reconciliation(bank=None, erp=None):
 
+    total_start = time.perf_counter()
+
     if bank is None:
         bank = load_bank_data()
 
@@ -413,6 +443,8 @@ def run_reconciliation(bank=None, erp=None):
     # --------------------------------------------------------
     # Deterministic reconciliation
     # --------------------------------------------------------
+
+    deterministic_start = time.perf_counter()
 
     for _, bank_row in bank.iterrows():
 
@@ -474,6 +506,12 @@ def run_reconciliation(bank=None, erp=None):
         deterministic_results
     )
 
+    print(
+        f"[TIMING] Deterministic matching: "
+        f"{time.perf_counter() - deterministic_start:.2f}s "
+        f"for {len(bank)} transactions"
+    )
+
 
     # --------------------------------------------------------
     # AI gate
@@ -496,6 +534,46 @@ def run_reconciliation(bank=None, erp=None):
     # --------------------------------------------------------
 
     ai_results = []
+    ai_start = time.perf_counter()
+
+    ai_results_by_transaction = {}
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_transaction_id = {}
+
+        for _, row in uncertain.iterrows():
+
+            transaction_id = row[
+                "transaction_id"
+            ]
+
+
+            bank_row = bank[
+                bank["transaction_id"]
+                .astype(str)
+                ==
+                str(transaction_id)
+            ].iloc[0]
+
+
+            future = executor.submit(
+                run_ai_on_transaction,
+                bank_row,
+                erp
+            )
+
+            future_to_transaction_id[future] = transaction_id
+
+
+        for future in as_completed(future_to_transaction_id):
+
+            transaction_id = future_to_transaction_id[
+                future
+            ]
+
+            ai_results_by_transaction[transaction_id] = (
+                future.result()
+            )
 
 
     for _, row in uncertain.iterrows():
@@ -505,26 +583,12 @@ def run_reconciliation(bank=None, erp=None):
         ]
 
 
-        bank_row = bank[
-            bank["transaction_id"]
-            .astype(str)
-            ==
-            str(transaction_id)
-        ].iloc[0]
-
-
-        ai_result = run_ai_on_transaction(
-            bank_row,
-            erp
-        )
-
-
         ai_results.append({
 
             "transaction_id":
                 transaction_id,
 
-            **ai_result,
+            **ai_results_by_transaction[transaction_id],
         })
 
 
@@ -532,11 +596,19 @@ def run_reconciliation(bank=None, erp=None):
         ai_results
     )
 
+    print(
+        f"[TIMING] AI stage: "
+        f"{time.perf_counter() - ai_start:.2f}s "
+        f"for {len(uncertain)} uncertain transactions "
+        f"(concurrency=3)"
+    )
+
 
     # --------------------------------------------------------
     # Save results
     # --------------------------------------------------------
 
+    database_start = time.perf_counter()
     connection = get_connection()
 
 
@@ -721,6 +793,16 @@ def run_reconciliation(bank=None, erp=None):
     connection.commit()
 
     connection.close()
+
+    print(
+        f"[TIMING] Database save: "
+        f"{time.perf_counter() - database_start:.2f}s"
+    )
+
+    print(
+        f"[TIMING] TOTAL reconciliation: "
+        f"{time.perf_counter() - total_start:.2f}s"
+    )
 
 
     return {

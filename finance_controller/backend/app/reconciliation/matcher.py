@@ -1,5 +1,6 @@
 import pandas as pd
 from rapidfuzz.fuzz import ratio
+import re
 
 
 def normalize_vendor(name):
@@ -97,6 +98,53 @@ def amount_similarity(bank_amount, erp_amount):
     else:
         return 0
 
+
+def normalize_settlement_reference(value):
+    """Normalize settlement references for exact comparison."""
+
+    if value is None or pd.isna(value):
+        return ""
+
+    normalized = str(value).strip().upper()
+
+    return re.sub(r"[\s-]+", "", normalized)
+
+
+def _first_settlement_reference(row, fields):
+    for field in fields:
+        value = normalize_settlement_reference(row.get(field, ""))
+        if value:
+            return value
+
+    return ""
+
+
+def settlement_reference_similarity(bank_row, erp_row):
+    """Return 100 when bank and Razorpay settlement references match."""
+
+    bank_reference = _first_settlement_reference(
+        bank_row,
+        [
+            "settlement_reference",
+            "bank_utr",
+            "bank_reference",
+            "reference",
+            "description",
+        ],
+    )
+    erp_reference = _first_settlement_reference(
+        erp_row,
+        [
+            "settlement_reference",
+            "settlement_utr",
+        ],
+    )
+
+    if bank_reference and bank_reference == erp_reference:
+        return 100
+
+    return 0
+
 def reference_similarity(bank_row, erp_row):
     """
     Check whether the ERP reference directly matches
@@ -142,6 +190,11 @@ def calculate_match_score(bank_row, erp_row):
         erp_row
     )
 
+    settlement_reference_score = settlement_reference_similarity(
+        bank_row,
+        erp_row
+    )
+
     exact_amount = (
         bank_row["amount"]
         == erp_row["amount"]
@@ -171,6 +224,15 @@ def calculate_match_score(bank_row, erp_row):
     if reference_score == 100:
         final_score = 100
 
+    if settlement_reference_score == 100:
+        amount_difference = abs(
+            bank_row["amount"]
+            - erp_row["amount"]
+        )
+
+        if amount_difference <= 500:
+            final_score = 100
+
     final_score = min(
         final_score,
         100
@@ -182,6 +244,7 @@ def calculate_match_score(bank_row, erp_row):
         "vendor_score": vendor_score,
         "date_score": date_score,
         "reference_score": reference_score,
+        "settlement_reference_score": settlement_reference_score,
     }
 
 def find_top_candidates(bank_row, erp, top_n=5):
@@ -211,11 +274,17 @@ def find_top_candidates(bank_row, erp, top_n=5):
             "vendor_score": scores["vendor_score"],
             "date_score": scores["date_score"],
             "reference_score": scores["reference_score"],
+            "settlement_reference_score": scores[
+                "settlement_reference_score"
+            ],
             "final_score": scores["final_score"],
         })
 
     candidates.sort(
-        key=lambda x: x["final_score"],
+        key=lambda x: (
+            x["settlement_reference_score"],
+            x["final_score"],
+        ),
         reverse=True
     )
 
