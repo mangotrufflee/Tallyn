@@ -1,8 +1,6 @@
 from pathlib import Path
 from io import BytesIO
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
-import time
 
 import pandas as pd
 
@@ -199,35 +197,9 @@ def run_ai_on_transaction(
     )
 
 
-    try:
-        raw_response = ask_ai(
-            prompt
-        )
-    except Exception as exc:
-        print(
-            f"[AI ERROR] Ollama/Qwen request failed for "
-            f"transaction {bank_row['transaction_id']}: {exc}"
-        )
-
-        return {
-
-            "ai_decision": "EXCEPTION",
-
-            "ai_invoice": None,
-
-            "ai_confidence": 0,
-
-            "ai_reason": f"AI request failed: {exc}",
-
-            "ai_risk": "HIGH",
-
-            "verification_decision": "EXCEPTION",
-
-            "verification_reason":
-                "Ollama/Qwen request failed",
-
-            "verification_checks": None,
-        }
+    raw_response = ask_ai(
+        prompt
+    )
 
 
     validation = validate_ai_response(
@@ -428,8 +400,6 @@ def run_ai_on_transaction(
 
 def run_reconciliation(bank=None, erp=None):
 
-    total_start = time.perf_counter()
-
     if bank is None:
         bank = load_bank_data()
 
@@ -443,8 +413,6 @@ def run_reconciliation(bank=None, erp=None):
     # --------------------------------------------------------
     # Deterministic reconciliation
     # --------------------------------------------------------
-
-    deterministic_start = time.perf_counter()
 
     for _, bank_row in bank.iterrows():
 
@@ -506,12 +474,6 @@ def run_reconciliation(bank=None, erp=None):
         deterministic_results
     )
 
-    print(
-        f"[TIMING] Deterministic matching: "
-        f"{time.perf_counter() - deterministic_start:.2f}s "
-        f"for {len(bank)} transactions"
-    )
-
 
     # --------------------------------------------------------
     # AI gate
@@ -534,46 +496,6 @@ def run_reconciliation(bank=None, erp=None):
     # --------------------------------------------------------
 
     ai_results = []
-    ai_start = time.perf_counter()
-
-    ai_results_by_transaction = {}
-
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        future_to_transaction_id = {}
-
-        for _, row in uncertain.iterrows():
-
-            transaction_id = row[
-                "transaction_id"
-            ]
-
-
-            bank_row = bank[
-                bank["transaction_id"]
-                .astype(str)
-                ==
-                str(transaction_id)
-            ].iloc[0]
-
-
-            future = executor.submit(
-                run_ai_on_transaction,
-                bank_row,
-                erp
-            )
-
-            future_to_transaction_id[future] = transaction_id
-
-
-        for future in as_completed(future_to_transaction_id):
-
-            transaction_id = future_to_transaction_id[
-                future
-            ]
-
-            ai_results_by_transaction[transaction_id] = (
-                future.result()
-            )
 
 
     for _, row in uncertain.iterrows():
@@ -583,12 +505,26 @@ def run_reconciliation(bank=None, erp=None):
         ]
 
 
+        bank_row = bank[
+            bank["transaction_id"]
+            .astype(str)
+            ==
+            str(transaction_id)
+        ].iloc[0]
+
+
+        ai_result = run_ai_on_transaction(
+            bank_row,
+            erp
+        )
+
+
         ai_results.append({
 
             "transaction_id":
                 transaction_id,
 
-            **ai_results_by_transaction[transaction_id],
+            **ai_result,
         })
 
 
@@ -596,19 +532,11 @@ def run_reconciliation(bank=None, erp=None):
         ai_results
     )
 
-    print(
-        f"[TIMING] AI stage: "
-        f"{time.perf_counter() - ai_start:.2f}s "
-        f"for {len(uncertain)} uncertain transactions "
-        f"(concurrency=3)"
-    )
-
 
     # --------------------------------------------------------
     # Save results
     # --------------------------------------------------------
 
-    database_start = time.perf_counter()
     connection = get_connection()
 
 
@@ -794,16 +722,6 @@ def run_reconciliation(bank=None, erp=None):
 
     connection.close()
 
-    print(
-        f"[TIMING] Database save: "
-        f"{time.perf_counter() - database_start:.2f}s"
-    )
-
-    print(
-        f"[TIMING] TOTAL reconciliation: "
-        f"{time.perf_counter() - total_start:.2f}s"
-    )
-
 
     return {
 
@@ -943,388 +861,186 @@ def get_summary():
 
 @app.get("/metrics")
 def get_metrics():
+    """Return reconciliation quality and control metrics.
 
+    Precision/recall/F1 use a real binary reconciliation definition:
+    a positive case has a ground-truth invoice; a positive prediction is
+    a final MATCHED decision.  This avoids reporting accuracy as recall.
+    """
     connection = get_connection()
 
-
-    # --------------------------------------------------------
-    # Deterministic accuracy
-    # --------------------------------------------------------
-
-    deterministic_rows = connection.execute(
+    rows = connection.execute(
         """
         SELECT
             r.matched_invoice,
+            r.verification_decision,
+            r.ai_decision,
+            r.ai_invoice,
+            r.review_status,
+            r.review_decision,
             g.expected_invoice
-
         FROM reconciliation_results r
-
         LEFT JOIN ground_truth g
-        ON r.transaction_id =
-           g.transaction_id
-
-        WHERE g.expected_invoice
-        IS NOT NULL
+          ON r.transaction_id = g.transaction_id
         """
     ).fetchall()
 
+    def norm(value):
+        if value is None:
+            return ""
+        text = str(value).strip().upper()
+        if text in {"", "NONE", "NAN", "NULL"}:
+            return ""
+        return text
 
-    deterministic_correct = 0
+    total = len(rows)
+    ai_cases = sum(1 for r in rows if r["ai_decision"] is not None)
+    ai_recommendations = sum(1 for r in rows if r["ai_decision"] == "MATCH")
+    ai_reviews = sum(1 for r in rows if r["ai_decision"] == "REVIEW")
+    guard_approved = sum(
+        1 for r in rows
+        if r["ai_decision"] == "MATCH"
+        and r["verification_decision"] == "MATCHED"
+    )
+    ai_matches_blocked = sum(
+        1 for r in rows
+        if r["ai_decision"] == "MATCH"
+        and r["verification_decision"] != "MATCHED"
+    )
 
+    expected_positive = []
+    expected_negative = []
+    for r in rows:
+        if norm(r["expected_invoice"]):
+            expected_positive.append(r)
+        else:
+            expected_negative.append(r)
 
-    for row in deterministic_rows:
+    true_positive = sum(
+        1 for r in expected_positive
+        if r["verification_decision"] == "MATCHED"
+        and norm(r["matched_invoice"]) == norm(r["expected_invoice"])
+    )
 
-        predicted = row[
-            "matched_invoice"
-        ]
-
-        expected = row[
-            "expected_invoice"
-        ]
-
-
-        if predicted is None:
-            continue
-
-
-        predicted = (
-            str(predicted)
-            .strip()
-            .upper()
+    false_negative = sum(
+        1 for r in expected_positive
+        if not (
+            r["verification_decision"] == "MATCHED"
+            and norm(r["matched_invoice"]) == norm(r["expected_invoice"])
         )
+    )
 
-        expected = (
-            str(expected)
-            .strip()
-            .upper()
-        )
+    false_positive = sum(
+        1 for r in expected_negative
+        if r["verification_decision"] == "MATCHED"
+    ) + sum(
+        1 for r in expected_positive
+        if r["verification_decision"] == "MATCHED"
+        and norm(r["matched_invoice"]) != norm(r["expected_invoice"])
+    )
 
+    true_negative = sum(
+        1 for r in expected_negative
+        if r["verification_decision"] != "MATCHED"
+    )
 
-        predicted = predicted.replace(
-            "_DUP",
-            ""
-        )
+    accuracy = (
+        (true_positive + true_negative) / total * 100
+        if total else 0
+    )
+    precision = (
+        true_positive / (true_positive + false_positive) * 100
+        if true_positive + false_positive else 0
+    )
+    recall = (
+        true_positive / (true_positive + false_negative) * 100
+        if true_positive + false_negative else 0
+    )
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision + recall else 0
+    )
 
-        expected = expected.replace(
-            "_DUP",
-            ""
-        )
-
-
-        if predicted == expected:
-
-            deterministic_correct += 1
-
-
+    deterministic_correct = sum(
+        1 for r in rows
+        if norm(r["matched_invoice"]) == norm(r["expected_invoice"])
+        and norm(r["expected_invoice"])
+    )
     deterministic_accuracy = (
-
-        deterministic_correct
-        /
-        len(deterministic_rows)
-        *
-        100
-
-        if deterministic_rows
-        else 0
+        deterministic_correct / len(expected_positive) * 100
+        if expected_positive else 0
     )
 
-
-    # ========================================================
-    # AI cases
-    # ========================================================
-
-    ai_cases = connection.execute(
-        """
-        SELECT COUNT(*)
-        FROM reconciliation_results
-        WHERE ai_decision IS NOT NULL
-        """
-    ).fetchone()[0]
-
-
-    # ========================================================
-    # AI recommendations
-    # ========================================================
-
-    ai_recommendations = connection.execute(
-        """
-        SELECT COUNT(*)
-        FROM reconciliation_results
-        WHERE ai_decision = 'MATCH'
-        """
-    ).fetchone()[0]
-
-
-    # AI match rate
     ai_match_rate = (
-        ai_recommendations
-        / ai_cases
-        * 100
-        if ai_cases
-        else 0
+        ai_recommendations / ai_cases * 100
+        if ai_cases else 0
     )
 
-    ai_review_recommendations = connection.execute(
-        """
-        SELECT COUNT(*)
-        FROM reconciliation_results
-        WHERE ai_decision = 'REVIEW'
-        """
-    ).fetchone()[0]
-
-    ai_evaluation_rows = connection.execute(
-        """
-        SELECT r.ai_invoice, g.expected_invoice
-        FROM reconciliation_results r
-        JOIN ground_truth g ON r.transaction_id = g.transaction_id
-        WHERE r.ai_decision = 'MATCH'
-        """
-    ).fetchall()
-
+    ai_match_rows = [r for r in rows if r["ai_decision"] == "MATCH"]
     ai_correct = sum(
-        1
-        for row in ai_evaluation_rows
-        if row["ai_invoice"]
-        and str(row["ai_invoice"]).strip().upper().replace("_DUP", "")
-        == str(row["expected_invoice"]).strip().upper().replace("_DUP", "")
+        1 for r in ai_match_rows
+        if norm(r["ai_invoice"])
+        == norm(r["expected_invoice"])
     )
     ai_recommendation_accuracy = (
-        ai_correct / len(ai_evaluation_rows) * 100
-        if ai_evaluation_rows
-        else 0
+        ai_correct / len(ai_match_rows) * 100
+        if ai_match_rows else 0
     )
 
+    final_matched = sum(
+        1 for r in rows
+        if r["verification_decision"] == "MATCHED"
+    )
+    review = sum(
+        1 for r in rows
+        if r["verification_decision"] == "REVIEW"
+    )
+    exceptions = sum(
+        1 for r in rows
+        if r["verification_decision"] == "EXCEPTION"
+    )
 
-    # --------------------------------------------------------
-    # Guard approved
-    # --------------------------------------------------------
-
-    guard_approved = connection.execute(
-        """
-        SELECT COUNT(*)
-
-        FROM reconciliation_results
-
-        WHERE ai_decision = 'MATCH'
-
-        AND verification_decision =
-        'MATCHED'
-        """
-    ).fetchone()[0]
-
-
-    # --------------------------------------------------------
-    # AI matches blocked
-    # --------------------------------------------------------
-
-    ai_matches_blocked = connection.execute(
-        """
-        SELECT COUNT(*)
-
-        FROM reconciliation_results
-
-        WHERE ai_decision = 'MATCH'
-
-        AND verification_decision !=
-        'MATCHED'
-        """
-    ).fetchone()[0]
-
-
-    # --------------------------------------------------------
-    # Guard approval accuracy
-    # --------------------------------------------------------
-
-    approved_rows = connection.execute(
-        """
-        SELECT
-            r.ai_invoice,
-            g.expected_invoice
-
-        FROM reconciliation_results r
-
-        LEFT JOIN ground_truth g
-        ON r.transaction_id =
-           g.transaction_id
-
-        WHERE r.ai_decision = 'MATCH'
-
-        AND r.verification_decision =
-        'MATCHED'
-
-        AND g.expected_invoice
-        IS NOT NULL
-        """
-    ).fetchall()
-
-
-    guard_correct = 0
-
-
-    for row in approved_rows:
-
-        predicted = row[
-            "ai_invoice"
-        ]
-
-        expected = row[
-            "expected_invoice"
-        ]
-
-
-        if predicted is None:
-            continue
-
-
-        predicted = (
-            str(predicted)
-            .strip()
-            .upper()
-            .replace("_DUP", "")
-        )
-
-        expected = (
-            str(expected)
-            .strip()
-            .upper()
-            .replace("_DUP", "")
-        )
-
-
-        if predicted == expected:
-
-            guard_correct += 1
-
-
+    guard_correct = sum(
+        1 for r in rows
+        if r["ai_decision"] == "MATCH"
+        and r["verification_decision"] == "MATCHED"
+        and norm(r["ai_invoice"])
+        == norm(r["expected_invoice"])
+    )
     guard_approval_accuracy = (
-
-        guard_correct
-        /
-        len(approved_rows)
-        *
-        100
-
-        if approved_rows
-        else 0
+        guard_correct / guard_approved * 100
+        if guard_approved else 0
     )
 
-
-    # --------------------------------------------------------
-    # Final match rate
-    # --------------------------------------------------------
-
-    total = connection.execute(
-        """
-        SELECT COUNT(*)
-        FROM transactions
-        """
-    ).fetchone()[0]
-
-
-    final_matched = connection.execute(
-        """
-        SELECT COUNT(*)
-
-        FROM reconciliation_results
-
-        WHERE verification_decision =
-        'MATCHED'
-        """
-    ).fetchone()[0]
-
-    human_reviewed = connection.execute(
-        """
-        SELECT COUNT(*)
-        FROM reconciliation_results
-        WHERE review_status = 'COMPLETED'
-        """
-    ).fetchone()[0]
-
-    human_approved = connection.execute(
-        """
-        SELECT COUNT(*)
-        FROM reconciliation_results
-        WHERE review_decision = 'APPROVE'
-        """
-    ).fetchone()[0]
-
-    human_rejected = connection.execute(
-        """
-        SELECT COUNT(*)
-        FROM reconciliation_results
-        WHERE review_decision = 'REJECT'
-        """
-    ).fetchone()[0]
-
-    human_unresolved = connection.execute(
-        """
-        SELECT COUNT(*)
-        FROM reconciliation_results
-        WHERE review_decision = 'UNRESOLVED'
-        """
-    ).fetchone()[0]
-
-
-    final_match_rate = (
-
-        final_matched
-        /
-        total
-        *
-        100
-
-        if total
-        else 0
-    )
-
+    human_reviewed = sum(1 for r in rows if r["review_status"] == "COMPLETED")
+    human_approved = sum(1 for r in rows if r["review_decision"] == "APPROVE")
+    human_rejected = sum(1 for r in rows if r["review_decision"] == "REJECT")
+    human_unresolved = sum(1 for r in rows if r["review_decision"] == "UNRESOLVED")
 
     connection.close()
 
-
     return {
-        "deterministic_accuracy":
-            round(
-                deterministic_accuracy,
-                2
-            ),
-
-        "ai_cases":
-            ai_cases,
-
-        "ai_recommendations":
-            ai_recommendations,
-
-        "ai_match_rate":
-            round(
-                ai_match_rate,
-                2
-            ),
-
-        "ai_review_recommendations": ai_review_recommendations,
-
-        "ai_recommendation_accuracy": round(
-            ai_recommendation_accuracy,
-            2,
-        ),
-
-        "guard_approved":
-            guard_approved,
-
-        "ai_matches_blocked":
-            ai_matches_blocked,
-
-        "guard_approval_accuracy":
-            round(
-                guard_approval_accuracy,
-                2
-            ),
-
-        "final_match_rate":
-            round(
-                final_match_rate,
-                2
-            ),
-
+        "deterministic_accuracy": round(deterministic_accuracy, 2),
+        "accuracy": round(accuracy, 2),
+        "precision": round(precision, 2),
+        "recall": round(recall, 2),
+        "f1": round(f1, 2),
+        "true_positive": true_positive,
+        "false_positive": false_positive,
+        "false_negative": false_negative,
+        "true_negative": true_negative,
+        "ai_cases": ai_cases,
+        "ai_recommendations": ai_recommendations,
+        "ai_match_rate": round(ai_match_rate, 2),
+        "ai_review_recommendations": ai_reviews,
+        "ai_recommendation_accuracy": round(ai_recommendation_accuracy, 2),
+        "guard_approved": guard_approved,
+        "ai_matches_blocked": ai_matches_blocked,
+        "guard_approval_accuracy": round(guard_approval_accuracy, 2),
+        "final_match_rate": round(final_matched / total * 100, 2) if total else 0,
+        "final_matched": final_matched,
+        "review": review,
+        "exceptions": exceptions,
         "human_reviewed": human_reviewed,
         "human_approved": human_approved,
         "human_rejected": human_rejected,
@@ -1332,8 +1048,49 @@ def get_metrics():
     }
 
 # ============================================================
+# BENCHMARK
+# ============================================================
+
+@app.get("/benchmark")
+def get_benchmark():
+    """Expose the latest measured Track 04 benchmark when available."""
+    benchmark_path = (
+        PROJECT_ROOT
+        / "data"
+        / "results"
+        / "final_benchmark_results.csv"
+    )
+
+    if not benchmark_path.exists():
+        return {"available": False}
+
+    frame = pd.read_csv(benchmark_path)
+    total = len(frame)
+    matched = int((frame["final_status"] == "MATCHED").sum())
+    review = int((frame["final_status"] == "REVIEW").sum())
+    exceptions = int((frame["final_status"] == "EXCEPTION").sum())
+    correct = int(frame["correct"].astype(bool).sum())
+
+    return {
+        "available": True,
+        "records": total,
+        "matched": matched,
+        "review": review,
+        "exceptions": exceptions,
+        "match_rate": round(matched / total * 100, 2) if total else 0,
+        "accuracy": round(correct / total * 100, 2) if total else 0,
+        "incorrect_automatic": int(
+            ((frame["final_status"] == "MATCHED") & (~frame["correct"].astype(bool))).sum()
+        ),
+        "ai_processed": int(frame["ai_decision"].notna().sum()) if "ai_decision" in frame else 0,
+        "ai_matches": int((frame["ai_decision"] == "MATCH").sum()) if "ai_decision" in frame else 0,
+        "guard_verified": int((frame["resolution"] == "AI_GUARD_VERIFIED").sum()) if "resolution" in frame else 0,
+    }
+
+# ============================================================
 # AI INSIGHTS
 # ============================================================
+
 
 @app.get("/ai-insights")
 def get_ai_insights():

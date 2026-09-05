@@ -226,3 +226,17 @@ export function validateReconciliationUpload(formData) {
 export function reconcileUploadedBatch(formData) {
   return sendBatchRequest("/reconcile/upload", formData);
 }
+
+// ============================================================
+// BENCHMARK
+// ============================================================
+
+export async function getBenchmark() {
+  const response = await fetch(`${API_BASE_URL}/benchmark`);
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch benchmark");
+  }
+
+  return response.json();
+}

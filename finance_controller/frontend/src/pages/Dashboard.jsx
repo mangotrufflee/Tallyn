@@ -13,24 +13,27 @@ import {
 } from "recharts";
 
 import KPICard from "../components/KPICard";
-import { getSummary, getMetrics } from "../services/api";
+import { getSummary, getMetrics, getBenchmark } from "../services/api";
 
 function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [metrics, setMetrics] = useState(null);
+  const [benchmark, setBenchmark] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [summaryData, metricsData] = await Promise.all([
+        const [summaryData, metricsData, benchmarkData] = await Promise.all([
           getSummary(),
           getMetrics(),
+          getBenchmark(),
         ]);
 
         setSummary(summaryData);
         setMetrics(metricsData);
+        setBenchmark(benchmarkData);
       } catch (err) {
         setError(err.message);
       } finally {
@@ -64,22 +67,10 @@ function Dashboard() {
     if (!metrics) return [];
 
     return [
-      {
-        name: "Deterministic",
-        value: metrics.deterministic_accuracy,
-      },
-      {
-        name: "AI",
-        value: metrics.ai_match_rate,
-      },
-      {
-        name: "Guard",
-        value: metrics.guard_approval_accuracy,
-      },
-      {
-        name: "Automated",
-        value: metrics.final_match_rate,
-      },
+      { name: "Accuracy", value: metrics.accuracy ?? metrics.deterministic_accuracy },
+      { name: "Precision", value: metrics.precision ?? 0 },
+      { name: "Recall", value: metrics.recall ?? 0 },
+      { name: "F1", value: metrics.f1 ?? 0 },
     ];
   }, [metrics]);
 
@@ -167,6 +158,60 @@ function Dashboard() {
 
       </div>
 
+
+      {/* MEASURED QUALITY */}
+
+      <div className="kpi-grid">
+
+        <KPICard
+          title="Accuracy"
+          value={`${(metrics.accuracy ?? 0).toFixed(2)}%`}
+          subtitle="Ground-truth reconciliation accuracy"
+        />
+
+        <KPICard
+          title="Precision"
+          value={`${(metrics.precision ?? 0).toFixed(2)}%`}
+          subtitle="Correct automatic matches"
+        />
+
+        <KPICard
+          title="Recall"
+          value={`${(metrics.recall ?? 0).toFixed(2)}%`}
+          subtitle="True matches recovered"
+        />
+
+        <KPICard
+          title="F1 Score"
+          value={`${(metrics.f1 ?? 0).toFixed(2)}%`}
+          subtitle="Balanced reconciliation quality"
+        />
+
+      </div>
+
+      {benchmark?.available && (
+        <div className="dashboard-card" style={{ marginBottom: "24px" }}>
+          <div className="card-header">
+            <div>
+              <h2>Track 04 Benchmark</h2>
+              <p>Measured on the 500-record synthetic evaluation batch.</p>
+            </div>
+            <div className="dashboard-status">
+              <span className="status-dot"></span>
+              Benchmark ready
+            </div>
+          </div>
+
+          <div className="performance-grid">
+            <div className="performance-item"><span>Records</span><strong>{benchmark.records}</strong><small>Processed end-to-end</small></div>
+            <div className="performance-item"><span>Match Rate</span><strong>{benchmark.match_rate.toFixed(2)}%</strong><small>Final automatic matches</small></div>
+            <div className="performance-item"><span>AI Processed</span><strong>{benchmark.ai_processed}</strong><small>Uncertain cases sent to AI</small></div>
+            <div className="performance-item"><span>Guard Verified</span><strong>{benchmark.guard_verified}</strong><small>AI matches independently verified</small></div>
+            <div className="performance-item"><span>AI Matches</span><strong>{benchmark.ai_matches}</strong><small>AI recommendations</small></div>
+            <div className="performance-item"><span>Unsafe Auto Matches</span><strong>{benchmark.incorrect_automatic}</strong><small>Must remain zero</small></div>
+          </div>
+        </div>
+      )}
 
       {/* MAIN CHART ROW */}
 
